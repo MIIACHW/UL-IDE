@@ -168,6 +168,11 @@ export function buildTechTree(bundle) {
     const m = parseModLocalization(cl.text);
     for (const [k, val] of m) tree.localization.zh.set(k, val);
   }
+  // user-editable custom dictionary (TechTreeIDE/dictionary.csv) — highest priority
+  if (bundle.customDictionary?.text) {
+    const m = parseModLocalization(bundle.customDictionary.text);
+    for (const [k, val] of m) tree.localization.zh.set(k, val);
+  }
 
   // icons
   for (const a of bundle.atlases) tree.icons.atlases.set(a.atlas, new Set(a.sprites.map(s => s.name)));

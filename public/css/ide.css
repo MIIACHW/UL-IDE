@@ -84,7 +84,10 @@ button.toggle.active { background: #2a3b4d; border-color: var(--accent); color: 
 .insp-hint { font-size: 11.5px; color: var(--dim); margin: 3px 0 6px; word-break: break-all; }
 .insp-hint.warn { color: var(--warn); }
 .insp-hint .dim { color: #5a6470; }
-.insp-pre { display: flex; gap: 5px; align-items: center; margin: 5px 0; }
+.insp-pre-wrap { margin: 4px 0 8px; }
+.insp-zh { font-size: 11px; color: #9ecf9e; margin: 2px 0 0 4px; word-break: break-all; }
+.insp-zh.dim { color: #5a6470; }
+.insp-pre { display: flex; gap: 5px; align-items: center; margin: 0; }
 .insp-pre select { background: var(--bg3); border: 1px solid var(--line); color: var(--fg); border-radius: 4px; padding: 2px 4px; font-size: 11.5px; max-width: 150px; }
 .insp-pre .pre-target { flex: 1; min-width: 0; font-family: Consolas, monospace; }
 .insp-req, .insp-eff { background: var(--bg3); border: 1px solid var(--line); border-radius: 5px; padding: 6px 8px; margin: 5px 0; font-size: 11.5px; }

@@ -137,6 +137,15 @@ function scanMod(modRoot) {
   for (const f of recipeFiles) scanNames(f, /<recipe\s+name="([^"]+)"/g, nameIndex.recipes);
   const nameIndexOut = { items: [...nameIndex.items], blocks: [...nameIndex.blocks], recipes: [...nameIndex.recipes] };
 
+  // user-editable custom dictionary (Key,schinese CSV) — merged last, wins over everything
+  let customDictionary = null;
+  const dictPath = path.join(IDE_ROOT, 'dictionary.csv');
+  if (fs.existsSync(dictPath)) {
+    const buf = fs.readFileSync(dictPath);
+    const { bom, text } = detectBom(buf);
+    customDictionary = { text, bom };
+  }
+
   // community/localization mods installed as siblings (e.g. ZZZZZ_XIHE汉化-亡灵遗产).
   // The game applies mods in alphabetical folder order, so later folders win —
   // we collect their Simplified Chinese files and overlay them in the same order.
@@ -168,6 +177,7 @@ function scanMod(modRoot) {
     localization,          // relative paths
     communityLocalization, // Chinese localization from sibling mods, in load order
     nameIndex: nameIndexOut, // {items, blocks, recipes} — for implicit-unlock resolution
+    customDictionary,      // {text, bom} from TechTreeIDE/dictionary.csv
     atlases,               // [{atlas, sprites:[{name, atlas}]}]
     allXmlCount: files.length,
     vanillaConfigRoot: VANILLA_CONFIG_ROOT,

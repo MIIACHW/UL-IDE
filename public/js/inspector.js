@@ -119,20 +119,26 @@ export function createInspector(container, ctx) {
     const su = section(c, `解锁物品 unlocks (${r.unlocks.length + (implicitKind ? 1 : 0)})`, ' <button class="mini" data-act="add-unlock">＋ 添加</button>');
     if (implicitKind) {
       // the game's implicit rule: a research unlocks the recipe/item/block of the same name
-      su.appendChild(h(`<div class="insp-pre" title="研究名与同名${implicitKind}——游戏自动解锁它的制作配方。改名会同步改变隐式解锁目标。">
-        <span class="badge pe">同名${implicitKind}</span>
-        <input class="pre-target" type="text" value="${esc(n.id)}" disabled>
+      const izh = resolveKey(tree, n.id);
+      su.appendChild(h(`<div class="insp-pre-wrap">
+        <div class="insp-pre" title="研究名与同名${implicitKind}——游戏自动解锁它的制作配方。改名会同步改变隐式解锁目标。">
+          <span class="badge pe">同名${implicitKind}</span>
+          <input class="pre-target" type="text" value="${esc(n.id)}" disabled>
+        </div>
+        ${izh ? `<div class="insp-zh">${esc(izh)}</div>` : ''}
       </div>`));
     }
     if (!r.unlocks.length && !implicitKind) su.appendChild(h('<div class="insp-hint">无解锁（研究名不同名任何物品/方块/配方，也没有显式 unlocks）</div>'));
     for (const u of r.unlocks) {
       const uzh = resolveKey(tree, u.name);
-      const row = h(`<div class="insp-pre" ${uzh ? `title="${esc(uzh)}"` : ''}>
-        <input class="pre-target" type="text" value="${esc(u.name)}" list="dl-nodes" spellcheck="false">
-        <button class="mini danger" title="删除">✕</button>
+      const row = h(`<div class="insp-pre-wrap">
+        <div class="insp-pre">
+          <input class="pre-target" type="text" value="${esc(u.name)}" list="dl-nodes" spellcheck="false">
+          <button class="mini danger" title="删除">✕</button>
+        </div>
+        ${uzh ? `<div class="insp-zh">${esc(uzh)}</div>` : ''}
       </div>`);
       su.appendChild(row);
-      if (uzh) row.appendChild(h(`<span class="kv dim" style="flex:1">${esc(uzh)}</span>`));
       const inp = row.querySelector('.pre-target');
       inp.addEventListener('change', () => { ctx.cmd(() => cmdSetDomAttr(tree, u.dom, 'name', inp.value, 'Set unlocks.name')); ctx.onDirty(); });
       row.querySelector('button').addEventListener('click', () => { ctx.cmd(() => cmdRemoveResearchChild(tree, n, u.dom)); ctx.onDirty(); });
@@ -147,10 +153,13 @@ export function createInspector(container, ctx) {
     const si = section(c, `研究消耗 ingredients (${r.ingredients.length})`, ' <button class="mini" data-act="add-ing">＋ 添加</button>');
     for (const ing of r.ingredients) {
       const izh = resolveKey(tree, ing.name);
-      const row = h(`<div class="insp-pre" ${izh ? `title="${esc(izh)}"` : ''}>
-        <input class="pre-target" type="text" value="${esc(ing.name)}" list="dl-nodes" spellcheck="false">
-        <input class="pre-val" type="text" value="${esc(ing.count)}" size="4" title="数量">
-        <button class="mini danger" title="删除">✕</button>
+      const row = h(`<div class="insp-pre-wrap">
+        <div class="insp-pre">
+          <input class="pre-target" type="text" value="${esc(ing.name)}" list="dl-nodes" spellcheck="false">
+          <input class="pre-val" type="text" value="${esc(ing.count)}" size="4" title="数量">
+          <button class="mini danger" title="删除">✕</button>
+        </div>
+        ${izh ? `<div class="insp-zh">${esc(izh)}</div>` : `<div class="insp-zh dim">（词典中无此键 — 可加入 TechTreeIDE/dictionary.csv）</div>`}
       </div>`);
       si.appendChild(row);
       const nameInp = row.querySelector('.pre-target');
