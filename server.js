@@ -120,6 +120,23 @@ function scanMod(modRoot) {
     return { path: f.path, size: f.size, sha1: sha1(buf), bom, text };
   });
 
+  // name index over items / blocks / recipes — used to resolve the game's implicit
+  // unlock rule: a research unlocks the recipe (and thus item/block) of the same name
+  const nameIndex = { items: new Set(), blocks: new Set(), recipes: new Set() };
+  const scanNames = (rel, re, set) => {
+    const p = path.join(configDir, rel);
+    if (!fs.existsSync(p)) return;
+    const text = fs.readFileSync(p, 'utf8');
+    let m; while ((m = re.exec(text))) set.add(m[1]);
+  };
+  const itemFiles = ['items.xml', ...files.filter(f => /^Config\/Custom\/items_.*\.xml$/i.test(f.path)).map(f => f.path.slice('Config/'.length))];
+  const blockFiles = ['blocks.xml', ...files.filter(f => /^Config\/Custom\/blocks_.*\.xml$/i.test(f.path)).map(f => f.path.slice('Config/'.length))];
+  const recipeFiles = ['recipes.xml', ...files.filter(f => /^Config\/Custom\/recipes_(?!research).*\.xml$/i.test(f.path)).map(f => f.path.slice('Config/'.length))];
+  for (const f of itemFiles) scanNames(f, /<item\s+name="([^"]+)"/g, nameIndex.items);
+  for (const f of blockFiles) scanNames(f, /<block\s+name="([^"]+)"/g, nameIndex.blocks);
+  for (const f of recipeFiles) scanNames(f, /<recipe\s+name="([^"]+)"/g, nameIndex.recipes);
+  const nameIndexOut = { items: [...nameIndex.items], blocks: [...nameIndex.blocks], recipes: [...nameIndex.recipes] };
+
   // community/localization mods installed as siblings (e.g. ZZZZZ_XIHE汉化-亡灵遗产).
   // The game applies mods in alphabetical folder order, so later folders win —
   // we collect their Simplified Chinese files and overlay them in the same order.
@@ -150,6 +167,7 @@ function scanMod(modRoot) {
     sourceFiles,           // tech tree definition files, with content
     localization,          // relative paths
     communityLocalization, // Chinese localization from sibling mods, in load order
+    nameIndex: nameIndexOut, // {items, blocks, recipes} — for implicit-unlock resolution
     atlases,               // [{atlas, sprites:[{name, atlas}]}]
     allXmlCount: files.length,
     vanillaConfigRoot: VANILLA_CONFIG_ROOT,

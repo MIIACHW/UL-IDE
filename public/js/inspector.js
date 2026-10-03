@@ -115,8 +115,16 @@ export function createInspector(container, ctx) {
 
     // ---- unlocks — the items this research makes craftable
     const r = n.research;
-    const su = section(c, `解锁物品 unlocks (${r.unlocks.length})`, ' <button class="mini" data-act="add-unlock">＋ 添加</button>');
-    if (!r.unlocks.length) su.appendChild(h('<div class="insp-hint">无显式解锁（研究名与物品同名时游戏自动解锁该物品）</div>'));
+    const implicitKind = { item: '物品', block: '方块', recipe: '配方' }[r.sameName] || null;
+    const su = section(c, `解锁物品 unlocks (${r.unlocks.length + (implicitKind ? 1 : 0)})`, ' <button class="mini" data-act="add-unlock">＋ 添加</button>');
+    if (implicitKind) {
+      // the game's implicit rule: a research unlocks the recipe/item/block of the same name
+      su.appendChild(h(`<div class="insp-pre" title="研究名与同名${implicitKind}——游戏自动解锁它的制作配方。改名会同步改变隐式解锁目标。">
+        <span class="badge pe">同名${implicitKind}</span>
+        <input class="pre-target" type="text" value="${esc(n.id)}" disabled>
+      </div>`));
+    }
+    if (!r.unlocks.length && !implicitKind) su.appendChild(h('<div class="insp-hint">无解锁（研究名不同名任何物品/方块/配方，也没有显式 unlocks）</div>'));
     for (const u of r.unlocks) {
       const uzh = resolveKey(tree, u.name);
       const row = h(`<div class="insp-pre" ${uzh ? `title="${esc(uzh)}"` : ''}>

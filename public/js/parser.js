@@ -172,6 +172,13 @@ export function buildTechTree(bundle) {
   // icons
   for (const a of bundle.atlases) tree.icons.atlases.set(a.atlas, new Set(a.sprites.map(s => s.name)));
 
+  // name index over items/blocks/recipes (implicit-unlock resolution)
+  tree.nameIndex = {
+    items: new Set(bundle.nameIndex?.items || []),
+    blocks: new Set(bundle.nameIndex?.blocks || []),
+    recipes: new Set(bundle.nameIndex?.recipes || []),
+  };
+
   // parse the research file
   for (const sf of bundle.sourceFiles) {
     if (sf.role !== 'research') continue;
@@ -216,6 +223,12 @@ export function buildTechTree(bundle) {
   for (const n of tree.nodes) {
     n.display = resolveKey(tree, n.id) || resolveKey(tree, n.id, 'en') || n.id;
     n.displayEn = tree.localization.en.get(n.id) || null;
+    // game rule: a research implicitly unlocks the recipe/item/block of the same name
+    if (n.kind === 'research' && n.research) {
+      n.research.sameName = tree.nameIndex.items.has(n.id) ? 'item'
+        : tree.nameIndex.blocks.has(n.id) ? 'block'
+        : tree.nameIndex.recipes.has(n.id) ? 'recipe' : null;
+    }
   }
 
   tree.unknownCount = tree.nodes.filter(n => n.unknownAttrs.length || n.unknownChildren.length).length;

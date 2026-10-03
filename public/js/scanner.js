@@ -21,6 +21,7 @@ export async function scanWorkspace(scanResult, log = () => {}) {
     localizationFiles: [],   // [{path, text, bom, lang}]
     communityLocalization: [], // [{mod, path, text, lang}] — sibling-mod Chinese, load order
     atlases: scanResult.atlases || [],
+    nameIndex: scanResult.nameIndex || { items: [], blocks: [], recipes: [] },
     vanilla: {},             // {localization: {text, bom, sha1}}
     warnings: [],
   };
