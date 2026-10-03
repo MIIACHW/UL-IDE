@@ -31,6 +31,8 @@ export function createLeftPanel(container, ctx) {
     container.querySelectorAll('[data-cat]').forEach(cb => cb.addEventListener('change', () => {
       cb.checked ? filter.categories.add(cb.dataset.cat) : filter.categories.delete(cb.dataset.cat);
       ctx.graph.render();
+      // frame whatever is visible now: a single branch jumps to center, several fit side by side
+      ctx.graph.fitView({ minScale: 0.45 });
     }));
     container.querySelectorAll('[data-edge]').forEach(cb => cb.addEventListener('change', () => {
       if (cb.checked) filter.edgeTypes.delete(cb.dataset.edge); else filter.edgeTypes.add(cb.dataset.edge);
@@ -40,6 +42,7 @@ export function createLeftPanel(container, ctx) {
     container.querySelector('[data-flag=onlyProblems]').addEventListener('change', (ev) => {
       filter.onlyProblems = ev.target.checked;
       ctx.graph.render();
+      ctx.graph.fitView({ minScale: 0.45 });
     });
   }
   return { render };

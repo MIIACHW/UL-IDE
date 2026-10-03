@@ -237,7 +237,8 @@ function cloneElementDom(el) {
 }
 
 // Generic DOM attribute edit (unlock names, ingredient names/counts, unknown attrs).
-export function cmdSetDomAttr(tree, dom, name, value, label) {
+// Pass `node` when the element belongs to a research node so its parsed cache refreshes.
+export function cmdSetDomAttr(tree, dom, name, value, label, node) {
   const cmd = {
     label: label || `Set ${name}`,
     do() {
@@ -247,11 +248,13 @@ export function cmdSetDomAttr(tree, dom, name, value, label) {
         this.prevVal = a ? a.decoded : undefined;
       }
       setAttrOnDom(dom, name, value);
+      if (node) reparseResearch(node);
       rebuildEdges(tree);
     },
     undo() {
       if (this.hadAttr) setAttrOnDom(dom, name, this.prevVal);
       else setAttrOnDom(dom, name, undefined);
+      if (node) reparseResearch(node);
       rebuildEdges(tree);
     },
   };
