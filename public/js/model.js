@@ -24,9 +24,11 @@ export function makeNode(partial) {
     nameKey: null, descKey: null,
     icon: null, category: null,
     parentId: null,
-    sourceFile: null, sourceLine: 0, sourcePath: '',
+    maxLevel: null, minLevel: null, baseCost: null, costMultiplier: null,
+    prerequisites: [],      // progression ProgressionLevel refs [{target, operation, value, ref}]
+    sourceMod: null, sourceFile: null, sourceLine: 0, sourcePath: '',
     dom: null,
-    research: null,         // {pos, area, unlocks, ingredients, requiresList, unlocked, ...}
+    research: null,         // research extras {pos, area, unlocks, ingredients, requiresList, unlocked, ...}
     unknownAttrs: [],
     unknownChildren: [],
     pos: null,              // IDE view layout (not XML)
@@ -109,6 +111,11 @@ function applyNodeAttr(node, name, value) {
     case 'icon': node.icon = value ?? null; break;
     case 'category': node.category = value || 'research'; break;
     case 'parent': node.parentId = value ?? null; break;
+    case 'name_key': node.nameKey = value ?? null; break;
+    case 'max_level': node.maxLevel = value == null ? null : parseInt(value, 10); break;
+    case 'min_level': node.minLevel = value == null ? null : parseInt(value, 10); break;
+    case 'base_skill_point_cost': node.baseCost = value == null ? null : parseFloat(value); break;
+    case 'cost_multiplier_per_level': node.costMultiplier = value == null ? null : parseFloat(value); break;
     case 'unlocked': if (node.research) node.research.unlocked = value === 'true'; break;
     case 'pos': if (node.research) { node.research.pos = value ?? null; const [px, py] = (value || '').split(',').map(v => parseFloat(v)); node.research.posX = Number.isFinite(px) ? px : null; node.research.posY = Number.isFinite(py) ? py : null; } break;
     case 'area': if (node.research) node.research.area = value ?? null; break;
@@ -149,6 +156,7 @@ function collectIdRefs(tree, id, out) {
       if (a.decoded == null) continue;
       if (a.name === 'parent' && a.decoded === id) out.push({ dom: el, attr: 'parent' });
       if (a.name === 'requires' && a.decoded.split(',').map(s => s.trim()).includes(id)) out.push({ dom: el, attr: 'requires' });
+      if (a.name === 'progression_name' && a.decoded === id) out.push({ dom: el, attr: 'progression_name' });
     }
   });
 }
@@ -160,6 +168,7 @@ function refreshRefs(tree, from, to) {
   for (const n of tree.nodes) {
     if (n.parentId === from) n.parentId = to;
     if (n.research) n.research.requiresList = n.research.requiresList.map(r => (r === from ? to : r));
+    for (const p of n.prerequisites || []) if (p.target === from) p.target = to;
   }
   for (const e of tree.edges) {
     if (e.from === from) e.from = to;
@@ -358,6 +367,9 @@ export function rebuildEdges(tree) {
       for (const r of n.research.requiresList) {
         edges.push(makeEdge({ id: `rq:${n.id}:${r}`, from: r, to: n.id, type: 'requires', label: 'requires', source: n.sourceFile }));
       }
+    }
+    for (const p of n.prerequisites || []) {
+      edges.push(makeEdge({ id: `q:${n.id}:${p.target}`, from: p.target, to: n.id, type: 'prerequisite', label: (p.operation || '') + ' ' + (p.value || ''), ref: p.ref, source: n.sourceFile }));
     }
   }
   tree.edges = edges;

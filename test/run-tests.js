@@ -6,13 +6,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseXML, serializeXML, setAttr, makeElement, appendElement, insertElementBefore, removeElement } from '../public/js/xmldom.js';
 import { buildTechTree, parseModLocalization, parseVanillaLocalization, resolveKey } from '../public/js/parser.js';
+import { classifyXml } from '../public/js/scanner.js';
 import { validate } from '../public/js/validator.js';
 import { generateFiles, isDirty } from '../public/js/generator.js';
 import { lineDiff, structuredDiff } from '../public/js/differ.js';
 import { CommandStack, cmdSetAttr, cmdRename, cmdDeleteNode, cmdDuplicateNode, cmdAddResearchChild, cmdRemoveResearchChild, rebuildEdges } from '../public/js/model.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const MOD_ROOT = path.resolve(HERE, '..', '..');
+const MOD_ROOT = path.resolve(HERE, '..', '..', 'UndeadLegacy');
 const CFG = path.join(MOD_ROOT, 'Config');
 let passed = 0, failed = 0;
 const failures = [];
@@ -85,29 +86,44 @@ test('insertElementBefore keeps sibling formatting', () => {
 // ------------------------------------------------------------------ parser
 function makeBundle() {
   return {
-    modRoot: MOD_ROOT,
+    modsDir: MOD_ROOT,
+    mods: [{ name: 'UndeadLegacy', modRoot: MOD_ROOT, version: '2.7.01', displayName: 'UndeadLegacy - Core Module' }],
     modInfo: { name: 'UndeadLegacy', version: '2.7.01' },
     scannedAt: 'test',
     sourceFiles: [
-      { path: 'Config/Custom/recipes_research.xml', size: researchText.length, sha1: '', bom: null, text: researchText, role: 'research' },
+      { mod: 'UndeadLegacy', modRoot: MOD_ROOT, path: 'Config/Custom/recipes_research.xml', size: researchText.length, sha1: '', bom: null, text: researchText, role: 'research' },
+      { mod: 'UndeadLegacy', modRoot: MOD_ROOT, path: 'Config/progression.xml', size: progressionText.length, sha1: '', bom: null, text: progressionText, role: 'progression' },
     ],
     localizationFiles: [
-      { path: 'Config/Localization/English.txt', text: locEn, bom: null, lang: 'English' },
-      { path: 'Config/Localization/SChinese.txt', text: locZh, bom: null, lang: 'SChinese' },
+      { mod: 'UndeadLegacy', path: 'Config/Localization/English.txt', text: locEn, bom: null, lang: 'English' },
+      { mod: 'UndeadLegacy', path: 'Config/Localization/SChinese.txt', text: locZh, bom: null, lang: 'SChinese' },
     ],
     atlases: [],
+    nameIndex: { items: [], blocks: [], recipes: [] },
+    customDictionary: null,
     vanilla: { localization: vanillaLocText ? { text: vanillaLocText, bom: null, sha1: '' } : null },
     warnings: [],
   };
 }
 let tree = null;
-test('parse: expected research counts', () => {
+test('parse: expected research + progression counts', () => {
   tree = buildTechTree(makeBundle());
-  eq(tree.nodes.length, 589, 'research nodes'); // 593 raw matches, 4 inside comments
-  const unlocks = tree.nodes.reduce((s, n) => s + (n.research.unlocks.length || 0), 0);
+  const count = (k) => tree.nodes.filter(n => n.kind === k).length;
+  eq(count('research'), 589, 'research nodes'); // 593 raw matches, 4 inside comments
+  eq(count('attribute'), 8, 'attributes');
+  eq(count('skill'), 30, 'skills');
+  eq(count('book_group'), 19, 'book groups');
+  eq(count('perk'), 102, 'perks'); // 104 raw matches, 2 inside comments
+  eq(count('book'), 152, 'books');
+  const unlocks = tree.nodes.reduce((s, n) => s + (n.research?.unlocks.length || 0), 0);
   eq(unlocks, 472, 'unlock entries'); // 476 raw matches, 4 inside comments
   assert(tree.edges.filter(e => e.type === 'requires').length >= 1, 'requires edges exist');
-  assert(tree.edges.filter(e => e.type === 'parent').length > 500, 'parent edges exist');
+  assert(tree.edges.filter(e => e.type === 'parent').length > 800, 'parent edges exist');
+});
+test('parse: classifier recognizes both tree styles', () => {
+  eq(classifyXml(researchText), 'research');
+  eq(classifyXml(progressionText), 'progression');
+  eq(classifyXml('<recipes><recipe name="x"/></recipes>'), null, 'plain recipes not a tree');
 });
 test('parse: branch categories propagated to subtrees', () => {
   const baton = tree.byId.get('meleeWpnBatonT0PipeBaton');
@@ -118,6 +134,12 @@ test('parse: branch categories propagated to subtrees', () => {
   const total = tree.categories.filter(c => c.kind === 'research')
     .reduce((s, c) => s + tree.nodes.filter(n => n.category === c.id).length, 0);
   eq(total, 589, 'every node classified');
+});
+test('parse: progression display via name_key', () => {
+  const deadeye = tree.byId.get('perkDeadEye');
+  eq(deadeye.displayEn, 'Dead Eye', 'vanilla english name via name_key');
+  assert(deadeye.display && deadeye.display !== '', 'display resolved');
+  eq(deadeye.category, 'attPerception', 'category propagated from attribute root');
 });
 test('parse: bilingual display names', () => {
   const modZh = parseModLocalization(locZh);
@@ -142,7 +164,7 @@ test('parse: branch labels localized', () => {
 });
 
 // ------------------------------------------------------------------ validator
-test('validate: pristine research data has zero errors', () => {
+test('validate: pristine multi-tree data has zero errors', () => {
   const { problems, summary } = validate(tree);
   const errs = problems.filter(p => p.severity === 'error');
   for (const e of errs.slice(0, 5)) console.log('      ERR: ' + e.message);

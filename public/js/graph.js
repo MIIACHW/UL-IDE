@@ -7,7 +7,7 @@ const NS = 'http://www.w3.org/2000/svg';
 const NODE_R = 26;            // half-size of the icon box
 const CELL_X = 62, CELL_Y = 96;
 
-const EDGE_COLORS = { parent: '#5a6572', requires: '#c96f6f' };
+const EDGE_COLORS = { parent: '#5a6572', requires: '#c96f6f', prerequisite: '#4da3ff' };
 
 function el(name, attrs = {}, parent) {
   const n = document.createElementNS(NS, name);
@@ -43,10 +43,10 @@ export function createGraph(container, tree, hooks) {
   // siblings sorted by the pos="x,y" hint (the game's DLL does the same).
   function layoutResearch() {
     state.nodePos.clear();
-    const researchNodes = tree.nodes.filter(n => n.kind === 'research');
+    const researchNodes = tree.nodes; // any kind — forests side by side on the root rail
     const children = new Map();
     for (const n of researchNodes) {
-      const p = n.parentId && tree.byId.get(n.parentId)?.kind === 'research' ? n.parentId : null;
+      const p = n.parentId && tree.byId.get(n.parentId) ? n.parentId : null;
       if (p) { if (!children.has(p)) children.set(p, []); children.get(p).push(n); }
     }
     const depthCache = new Map();
@@ -73,7 +73,7 @@ export function createGraph(container, tree, hooks) {
       state.nodePos.set(n.id, { x, y: -depthOf(n) * CELL_Y, root: !n.parentId });
       return x;
     };
-    const roots = researchNodes.filter(n => !n.parentId || tree.byId.get(n.parentId)?.kind !== 'research')
+    const roots = researchNodes.filter(n => !n.parentId || !tree.byId.get(n.parentId))
       .sort((a, b) => (a.research?.posX ?? 0) - (b.research?.posX ?? 0) || a.sourceLine - b.sourceLine);
     for (const r of roots) { if (leafX > 0) leafX += 1; place(r); }
     // user-dragged IDE positions win (view state only — the game auto-lays-out too)
@@ -84,9 +84,9 @@ export function createGraph(container, tree, hooks) {
 
   // ---------------------------------------------------------- filtering
   function matchesFilter(n) {
-    if (n.kind !== 'research') return false;
     const f = hooks.filter;
     if (f) {
+      if (f.mods && f.mods.size && !f.mods.has(n.sourceMod)) return false;
       if (f.kinds && f.kinds.size && !f.kinds.has(n.kind)) return false;
       if (f.categories && f.categories.size && !f.categories.has(n.category)) return false;
       if (f.onlyProblems && !state.problemNodes.has(n.id)) return false;

@@ -7,18 +7,27 @@ const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').
 
 export function createLeftPanel(container, ctx) {
   // ctx: {tree, graph, onFilterChange()}
-  const filter = { kinds: new Set(), categories: new Set(), onlyProblems: false, edgeTypes: new Set() };
+  const filter = { mods: new Set(), kinds: new Set(), categories: new Set(), onlyProblems: false, edgeTypes: new Set() };
   ctx.filter = filter;
+  const KIND_LABELS = { research: '研究节点', attribute: '属性大类', skill: '技能', book_group: '书组', perk: 'Perk', book: '书', progression: '进度节点' };
 
   function render() {
     const tree = ctx.tree;
+    const modsPresent = [...new Set(tree.nodes.map(n => n.sourceMod))];
+    const kindsPresent = [...new Set(tree.nodes.map(n => n.kind))];
     container.innerHTML = `
       <div class="lp-search"><input type="search" placeholder="搜索 ID / 中文名 / 描述…"></div>
-      <div class="lp-block lp-cats"><div class="lp-title">研究分支（对应游戏左侧大类）</div>
-        ${tree.categories.filter(c => c.kind === 'research').map(c => `<label class="lp-check"><input type="checkbox" data-cat="${esc(c.id)}"> ${esc(c.label)} <span class="cnt">${tree.nodes.filter(n => n.category === c.id).length}</span></label>`).join('')}
+      <div class="lp-block"><div class="lp-title">Mod</div>
+        ${modsPresent.map(m => `<label class="lp-check"><input type="checkbox" data-mod="${esc(m)}"> ${esc(m)} <span class="cnt">${tree.nodes.filter(n => n.sourceMod === m).length}</span></label>`).join('')}
+      </div>
+      <div class="lp-block"><div class="lp-title">类型</div>
+        ${kindsPresent.map(k => `<label class="lp-check"><input type="checkbox" data-kind="${k}"> ${KIND_LABELS[k] || k} <span class="cnt">${tree.nodes.filter(n => n.kind === k).length}</span></label>`).join('')}
+      </div>
+      <div class="lp-block lp-cats"><div class="lp-title">分类（研究分支 / 属性大类）</div>
+        ${tree.categories.map(c => `<label class="lp-check"><input type="checkbox" data-cat="${esc(c.id)}"> ${esc(c.label)} <span class="cnt">${tree.nodes.filter(n => n.category === c.id).length}</span></label>`).join('')}
       </div>
       <div class="lp-block"><div class="lp-title">边类型</div>
-        ${[['parent', '层级 parent'], ['requires', '额外前置 requires']].map(([t, label]) => `<label class="lp-check"><input type="checkbox" data-edge="${t}" checked> ${label}</label>`).join('')}
+        ${[['parent', '层级 parent'], ['requires', '额外前置 requires'], ['prerequisite', 'ProgressionLevel 前置']].map(([t, label]) => `<label class="lp-check"><input type="checkbox" data-edge="${t}" checked> ${label}</label>`).join('')}
       </div>
       <div class="lp-block"><label class="lp-check"><input type="checkbox" data-flag="onlyProblems"> 只显示有问题的节点</label></div>
     `;
@@ -32,6 +41,16 @@ export function createLeftPanel(container, ctx) {
       cb.checked ? filter.categories.add(cb.dataset.cat) : filter.categories.delete(cb.dataset.cat);
       ctx.graph.render();
       // frame whatever is visible now: a single branch jumps to center, several fit side by side
+      ctx.graph.fitView({ minScale: 0.45 });
+    }));
+    container.querySelectorAll('[data-mod]').forEach(cb => cb.addEventListener('change', () => {
+      cb.checked ? filter.mods.add(cb.dataset.mod) : filter.mods.delete(cb.dataset.mod);
+      ctx.graph.render();
+      ctx.graph.fitView({ minScale: 0.45 });
+    }));
+    container.querySelectorAll('[data-kind]').forEach(cb => cb.addEventListener('change', () => {
+      cb.checked ? filter.kinds.add(cb.dataset.kind) : filter.kinds.delete(cb.dataset.kind);
+      ctx.graph.render();
       ctx.graph.fitView({ minScale: 0.45 });
     }));
     container.querySelectorAll('[data-edge]').forEach(cb => cb.addEventListener('change', () => {
@@ -105,7 +124,7 @@ export function createBottomPanel(container, ctx) {
     const tree = ctx.tree;
     const bar = document.createElement('div');
     bar.className = 'bp-xml-bar';
-    bar.innerHTML = tree.sourceFiles.map((sf, i) => `<button class="mini ${xmlFile === i ? 'primary' : ''}" data-file="${i}">${esc(sf.path)}</button>`).join('');
+    bar.innerHTML = tree.sourceFiles.map((sf, i) => `<button class="mini ${xmlFile === i ? 'primary' : ''}" data-file="${i}">[${esc(sf.mod)}] ${esc(sf.path)}</button>`).join('');
     body.appendChild(bar);
     if (xmlFile == null || !tree.sourceFiles[xmlFile]) xmlFile = 0;
     const sf = tree.sourceFiles[xmlFile];
@@ -171,5 +190,5 @@ export function createBottomPanel(container, ctx) {
     }
   }
 
-  return { switchTo, render, get active() { return active; } };
+  return { switchTo, render, setActiveXmlFile: (i) => { xmlFile = i; }, get active() { return active; } };
 }

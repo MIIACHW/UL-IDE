@@ -1,6 +1,7 @@
-// Parser — Raw research XML → Unified TechTree Model (research tree only).
-// Everything the schema below does not understand lands in unknownAttrs /
-// unknownChildren and stays in the DOM; serialization never drops it.
+// Parser — Raw tech-tree XML → Unified TechTree Model (multi-mod, multi-tree).
+// Two tree styles are recognized, both round-trip safe with unknown data preserved:
+//   research-style    — <research> elements (UL research unlocks)
+//   progression-style — vanilla-format <attribute/skill/book_group/perk/book>
 // Localization is bilingual: Simplified Chinese preferred, English fallback.
 import { parseXML, serializeXML, findRoot, childElements } from './xmldom.js';
 import { createTechTree, makeNode, rebuildEdges } from './model.js';
@@ -8,6 +9,14 @@ import { createTechTree, makeNode, rebuildEdges } from './model.js';
 // ------------------------------------------------------------- schemas
 const KNOWN_ATTRS_RESEARCH = ['name', 'desc', 'pos', 'area', 'parent', 'category', 'icon', 'size', 'link_type',
   'unlocked', 'requires'];
+const KNOWN_ATTRS_PROG = {
+  attribute: ['name', 'name_key', 'desc_key', 'icon', 'min_level', 'max_level', 'base_skill_point_cost', 'cost_multiplier_per_level'],
+  skill: ['parent', 'name', 'name_key', 'desc_key', 'icon'],
+  book_group: ['parent', 'name', 'name_key', 'desc_key', 'icon'],
+  perk: ['parent', 'name', 'max_level', 'name_key', 'desc_key', 'icon', 'base_skill_point_cost', 'cost_multiplier_per_level'],
+  book: ['parent', 'name', 'max_level', 'base_skill_point_cost', 'name_key', 'desc_key', 'icon', 'long_desc_key'],
+};
+function num(v) { if (v == null) return null; const n = parseFloat(v); return Number.isFinite(n) ? n : null; }
 
 // ------------------------------------------------------------- localization
 function splitCsvLine(line) {
@@ -99,19 +108,28 @@ function attrsOf(el) {
 
 // ------------------------------------------------------------- recipes_research.xml
 function parseResearchFile(tree, sf) {
+  // accepted shapes: <Subquake><set|append xpath=...>…</set|append></Subquake> (UL patch)
+  // or a standalone file whose root (directly or via set/append) holds <research> children
   const root = findRoot(sf.dom, 'Subquake');
-  if (!root) return;
-  const wrapper = childElements(root).find(c => c.name === 'append' || c.name === 'set');
-  if (!wrapper) return;
-  sf.patchType = wrapper.name;
-  sf.patchXpath = wrapper.attrs.find(a => a.name === 'xpath')?.decoded || '';
+  let container = null;
+  if (root) {
+    const wrapper = childElements(root).find(c => c.name === 'append' || c.name === 'set');
+    if (!wrapper) return;
+    sf.patchType = wrapper.name;
+    sf.patchXpath = wrapper.attrs.find(a => a.name === 'xpath')?.decoded || '';
+    container = wrapper;
+  } else {
+    let el = sf.dom.children.find(c => c.kind === 'element');
+    if (!el) return;
+    const wrapper = childElements(el).find(c => c.name === 'append' || c.name === 'set');
+    container = wrapper || el;
+    sf.patchType = wrapper ? wrapper.name : 'root';
+    sf.patchXpath = wrapper?.attrs.find(a => a.name === 'xpath')?.decoded || '';
+  }
 
-  for (const c of childElements(wrapper)) {
-    if (c.name !== 'research') {
-      tree.meta.unknownTopLevel = tree.meta.unknownTopLevel || [];
-      tree.meta.unknownTopLevel.push({ file: sf.path, name: c.name, line: c.line });
-      continue;
-    }
+  for (const c of childElements(container)) {
+    if (c.name !== 'research') continue; // mixed files (research + recipes) — preserved in DOM, not modeled
+
     const attrs = attrsOf(c);
     const posRaw = attrs.pos || '';
     const [px, py] = posRaw.split(',').map(v => parseFloat(v.trim()));
@@ -119,7 +137,7 @@ function parseResearchFile(tree, sf) {
       id: attrs.name || '', kind: 'research',
       descKey: attrs.desc || null, icon: attrs.icon || null,
       category: attrs.category || 'research', parentId: attrs.parent || null,
-      sourceFile: sf.path, sourceLine: c.line, dom: c,
+      sourceMod: sf.mod, sourceFile: sf.path, sourceLine: c.line, dom: c,
       research: {
         dom: c, pos: posRaw || null, posX: Number.isFinite(px) ? px : null, posY: Number.isFinite(py) ? py : null,
         area: attrs.area || null, size: attrs.size || null, linkType: attrs.link_type || null,
@@ -138,6 +156,57 @@ function parseResearchFile(tree, sf) {
       else node.unknownChildren.push({ kind: 'element', name: ch.name, xml: serializeXML(ch).slice(0, 4000) });
     }
     registerNode(tree, node);
+  }
+}
+
+// ------------------------------------------------------------- progression-style files
+// Vanilla-format tech trees: <progression> root (or a set/append patch wrapping one)
+// containing <attributes>/<skills>/<perks> with <attribute|skill|book_group|perk|book name=...>.
+function parseProgressionFile(tree, sf) {
+  const rootEl = sf.dom.children.find(c => c.kind === 'element');
+  if (!rootEl) return;
+  let content = rootEl;
+  const wrapper = childElements(rootEl).find(c => c.name === 'set' || c.name === 'append');
+  if (wrapper) content = wrapper;
+  sf.patchType = wrapper ? wrapper.name : 'root';
+  sf.patchXpath = wrapper?.attrs.find(a => a.name === 'xpath')?.decoded || '';
+
+  const visit = (el, kind) => {
+    const attrs = attrsOf(el);
+    const id = attrs.name || '';
+    if (!id) return; // layout-only elements (<skill id=...>) have no name and are skipped
+    const node = makeNode({
+      id, kind,
+      nameKey: attrs.name_key || null, descKey: attrs.desc_key || null,
+      icon: attrs.icon || null, parentId: attrs.parent || null,
+      maxLevel: num(attrs.max_level), minLevel: num(attrs.min_level),
+      baseCost: num(attrs.base_skill_point_cost), costMultiplier: num(attrs.cost_multiplier_per_level),
+      sourceMod: sf.mod, sourceFile: sf.path, sourceLine: el.line, dom: el,
+    });
+    const known = new Set(KNOWN_ATTRS_PROG[kind] || []);
+    for (const a of el.attrs) {
+      if (a.decoded !== null && !known.has(a.name)) node.unknownAttrs.push({ name: a.name, value: a.decoded });
+    }
+    // direct-child requirements of effect_group: collect ProgressionLevel references
+    node.prerequisites = [];
+    for (const ch of childElements(el)) {
+      if (ch.name !== 'effect_group') { node.unknownChildren.push({ kind: 'element', name: ch.name, xml: serializeXML(ch).slice(0, 2000) }); continue; }
+      for (const sub of childElements(ch)) {
+        if (sub.name !== 'requirement') continue;
+        const ra = attrsOf(sub);
+        if (ra.name === 'ProgressionLevel' && ra.progression_name && ra.progression_name !== id) {
+          node.prerequisites.push({ target: ra.progression_name, operation: ra.operation || '', value: ra.value || '', ref: sub });
+        }
+      }
+    }
+    registerNode(tree, node);
+  };
+
+  for (const c of childElements(content)) {
+    if (c.name === 'attributes') { for (const a of childElements(c)) if (a.name === 'attribute') visit(a, 'attribute'); }
+    else if (c.name === 'skills') { for (const a of childElements(c)) { if (a.name === 'skill') visit(a, 'skill'); else if (a.name === 'book_group') visit(a, 'book_group'); } }
+    else if (c.name === 'perks') { for (const a of childElements(c)) { if (a.name === 'perk') visit(a, 'perk'); else if (a.name === 'book') visit(a, 'book'); } }
+    else if (c.name === 'progression') visit(c, 'progression');
   }
 }
 
@@ -175,7 +244,7 @@ export function buildTechTree(bundle) {
   }
 
   // icons
-  for (const a of bundle.atlases) tree.icons.atlases.set(a.atlas, new Set(a.sprites.map(s => s.name)));
+  for (const a of bundle.atlases || []) tree.icons.atlases.set(a.atlas, new Set(a.sprites.map(s => s.name)));
 
   // name index over items/blocks/recipes (implicit-unlock resolution)
   tree.nameIndex = {
@@ -184,50 +253,61 @@ export function buildTechTree(bundle) {
     recipes: new Set(bundle.nameIndex?.recipes || []),
   };
 
-  // parse the research file
+  // parse tech tree files by role
   for (const sf of bundle.sourceFiles) {
-    if (sf.role !== 'research') continue;
     let dom;
-    try { dom = parseXML(sf.text, { sourceName: sf.path }); }
+    try { dom = parseXML(sf.text, { sourceName: (sf.mod ? sf.mod + '/' : '') + sf.path }); }
     catch (e) {
       tree.meta.parseErrors = tree.meta.parseErrors || [];
-      tree.meta.parseErrors.push({ file: sf.path, line: e.line || 0, message: e.message });
+      tree.meta.parseErrors.push({ file: (sf.mod ? sf.mod + '/' : '') + sf.path, line: e.line || 0, message: e.message });
       continue;
     }
-    const record = { path: sf.path, text: sf.text, dom, sha1: sf.sha1, bom: sf.bom, role: sf.role, patchType: '', patchXpath: '' };
+    const record = { mod: sf.mod || '(drop)', modRoot: sf.modRoot || null, path: sf.path, text: sf.text, dom, sha1: sf.sha1, bom: sf.bom, role: sf.role, patchType: '', patchXpath: '' };
     tree.sourceFiles.push(record);
-    parseResearchFile(tree, record);
+    if (sf.role === 'research') parseResearchFile(tree, record);
+    else if (sf.role === 'progression') parseProgressionFile(tree, record);
   }
 
-  // categories: the 12 research branches
+
+  // categories: research branches (category attr) + progression attributes
   const seen = new Set();
   for (const n of tree.nodes) {
-    if (n.category && n.category !== 'research' && !seen.has(n.category)) {
+    if (n.kind === 'research' && n.category && n.category !== 'research' && !seen.has(n.category)) {
       seen.add(n.category);
       tree.categories.push({ id: n.category, label: researchCategoryLabel(tree, n.category), kind: 'research', icon: n.icon });
     }
   }
-
-  // inherit the branch category down each subtree (game's left panel semantics)
-  const children = new Map();
   for (const n of tree.nodes) {
-    const p = n.parentId && tree.byId.get(n.parentId)?.kind === 'research' ? n.parentId : null;
-    if (p) { if (!children.has(p)) children.set(p, []); children.get(p).push(n); }
-  }
-  for (const n of tree.nodes) {
-    if (!n.category || n.category === 'research') continue;
-    const stack = [...(children.get(n.id) || [])];
-    while (stack.length) {
-      const c = stack.pop();
-      c.category = n.category;
-      for (const gc of children.get(c.id) || []) stack.push(gc);
+    if (n.kind === 'attribute' && !seen.has(n.id)) {
+      seen.add(n.id);
+      tree.categories.push({ id: n.id, label: resolveKey(tree, n.nameKey) || n.id, kind: 'progression', icon: n.icon });
     }
   }
 
-  // localized display names — the localization key of an item IS the item name
+  // inherit category down each tree (research branches by category attr; progression by attribute root)
+  const children = new Map();
   for (const n of tree.nodes) {
-    n.display = resolveKey(tree, n.id) || resolveKey(tree, n.id, 'en') || n.id;
-    n.displayEn = tree.localization.en.get(n.id) || null;
+    const p = n.parentId && tree.byId.get(n.parentId) ? n.parentId : null;
+    if (p) { if (!children.has(p)) children.set(p, []); children.get(p).push(n); }
+  }
+  const propagate = (n, cat) => {
+    const stack = [...(children.get(n.id) || [])];
+    while (stack.length) {
+      const c = stack.pop();
+      c.category = cat;
+      for (const gc of children.get(c.id) || []) stack.push(gc);
+    }
+  };
+  for (const n of tree.nodes) {
+    if (n.kind === 'research' && n.category && n.category !== 'research') propagate(n, n.category);
+    if (n.kind === 'attribute') propagate(n, n.id);
+  }
+
+  // localized display names: research key = node id (item name); progression key = name_key
+  for (const n of tree.nodes) {
+    const key = n.kind === 'research' ? n.id : (n.nameKey && n.nameKey !== 'null' ? n.nameKey : n.id);
+    n.display = resolveKey(tree, key) || resolveKey(tree, key, 'en') || n.id;
+    n.displayEn = tree.localization.en.get(key) || null;
     // game rule: a research implicitly unlocks the recipe/item/block of the same name
     if (n.kind === 'research' && n.research) {
       n.research.sameName = tree.nameIndex.items.has(n.id) ? 'item'
