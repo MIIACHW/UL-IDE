@@ -54,6 +54,51 @@ export function createInspector(container, ctx) {
     }
   }
 
+  // Chinese-aware suggestion dropdown for key inputs: type 中文 or part of the key,
+  // get matching research keys back. Replaces the native datalist on .pre-target inputs.
+  function attachZhSuggest(input, tree) {
+    let box = null;
+    const close = () => { box?.remove(); box = null; };
+    const commit = (node) => {
+      input.value = node.id;
+      close();
+      input.dispatchEvent(new Event('change'));
+      input.focus();
+    };
+    const renderBox = (q) => {
+      close();
+      const ql = q.trim().toLowerCase();
+      if (!ql) return;
+      const matches = tree.nodes
+        .filter(n => (n.display || '').toLowerCase().includes(ql) || n.id.toLowerCase().includes(ql) || (n.displayEn || '').toLowerCase().includes(ql))
+        .slice(0, 8);
+      if (!matches.length) return;
+      const rect = input.getBoundingClientRect();
+      box = h(`<div class="zh-suggest"></div>`);
+      box.style.left = rect.left + 'px';
+      box.style.top = rect.bottom + 2 + 'px';
+      box.style.width = Math.max(rect.width, 260) + 'px';
+      for (const n of matches) {
+        const row = h(`<div class="zh-suggest-row"><span>${esc(n.display || n.id)}</span><span class="dim">${esc(n.id)}</span></div>`);
+        row.addEventListener('mousedown', (ev) => { ev.preventDefault(); commit(n); });
+        box.appendChild(row);
+      }
+      const first = box.firstChild;
+      first.classList.add('active');
+      const onKey = (ev) => {
+        if (ev.key === 'Enter') { ev.preventDefault(); commit(matches[0]); cleanup(); }
+        else if (ev.key === 'Escape') { close(); cleanup(); }
+      };
+      const cleanup = () => { input.removeEventListener('keydown', onKey, true); input.removeEventListener('blur', onBlur); };
+      const onBlur = () => setTimeout(close, 120);
+      input.addEventListener('keydown', onKey, true);
+      input.addEventListener('blur', onBlur);
+      document.body.appendChild(box);
+    };
+    input.addEventListener('input', () => renderBox(input.value));
+    input.addEventListener('blur', () => setTimeout(close, 120));
+  }
+
   function render() {
     const c = header();
     if (!current) {
@@ -133,13 +178,14 @@ export function createInspector(container, ctx) {
       const uzh = resolveKey(tree, u.name);
       const row = h(`<div class="insp-pre-wrap">
         <div class="insp-pre">
-          <input class="pre-target" type="text" value="${esc(u.name)}" list="dl-nodes" spellcheck="false">
+          <input class="pre-target" type="text" value="${esc(u.name)}" spellcheck="false" placeholder="输入中文或键名…">
           <button class="mini danger" title="删除">✕</button>
         </div>
         ${uzh ? `<div class="insp-zh">${esc(uzh)}</div>` : ''}
       </div>`);
       su.appendChild(row);
       const inp = row.querySelector('.pre-target');
+      attachZhSuggest(inp, tree);
       inp.addEventListener('change', () => { ctx.cmd(() => cmdSetDomAttr(tree, u.dom, 'name', inp.value, 'Set unlocks.name')); ctx.onDirty(); });
       row.querySelector('button').addEventListener('click', () => { ctx.cmd(() => cmdRemoveResearchChild(tree, n, u.dom)); ctx.onDirty(); });
     }
@@ -155,7 +201,7 @@ export function createInspector(container, ctx) {
       const izh = resolveKey(tree, ing.name);
       const row = h(`<div class="insp-pre-wrap">
         <div class="insp-pre">
-          <input class="pre-target" type="text" value="${esc(ing.name)}" list="dl-nodes" spellcheck="false">
+          <input class="pre-target" type="text" value="${esc(ing.name)}" spellcheck="false" placeholder="输入中文或键名…">
           <input class="pre-val" type="text" value="${esc(ing.count)}" size="4" title="数量">
           <button class="mini danger" title="删除">✕</button>
         </div>
@@ -163,6 +209,7 @@ export function createInspector(container, ctx) {
       </div>`);
       si.appendChild(row);
       const nameInp = row.querySelector('.pre-target');
+      attachZhSuggest(nameInp, tree);
       const cntInp = row.querySelector('.pre-val');
       nameInp.addEventListener('change', () => { ctx.cmd(() => cmdSetDomAttr(tree, ing.dom, 'name', nameInp.value)); ctx.onDirty(); });
       cntInp.addEventListener('change', () => { ctx.cmd(() => cmdSetDomAttr(tree, ing.dom, 'count', cntInp.value || undefined)); ctx.onDirty(); });

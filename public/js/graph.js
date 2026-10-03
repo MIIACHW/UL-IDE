@@ -212,16 +212,23 @@ export function createGraph(container, tree, hooks) {
     // game's own missingIcon texture. ui_game_symbol_* glyphs are drawn as SVG.
     const candidates = [];
     if (n.id) candidates.push({ name: n.id });
+    // first explicit unlock — the server resolves it through the game's own
+    // Extends/Icon inheritance, so Powered variants get their real item icon
+    if (n.research?.unlocks?.[0]?.name) candidates.push({ name: n.research.unlocks[0].name });
+    // symbol_* fuzzily maps to a thematically related item icon (symbol_baton -> *baton*.png)
+    if (n.icon && /^symbol_/i.test(n.icon) && !/^ui_game_symbol_/i.test(n.icon)) {
+      const base = n.icon.replace(/^symbol_/i, '');
+      candidates.push({ name: n.icon, fuzzy: base });
+      if (base.includes('_')) candidates.push({ name: n.icon, fuzzy: base.split('_').pop() });
+    }
+    // ui_game_symbol_* / unmatched symbol_*: the game's flat glyph, drawn as SVG
     if (n.icon && /^ui_game_symbol_/i.test(n.icon)) {
       candidates.push({ svg: symbolSvg(n.icon.replace(/^ui_game_symbol_/i, '')) });
     }
     if (n.icon && /^symbol_/i.test(n.icon) && !/^ui_game_symbol_/i.test(n.icon)) {
       const base = n.icon.replace(/^symbol_/i, '');
-      candidates.push({ name: n.icon, fuzzy: base });
-      if (base.includes('_')) candidates.push({ name: n.icon, fuzzy: base.split('_').pop() });
       candidates.push({ svg: symbolSvg(base) });
     }
-    if (n.research?.unlocks?.[0]?.name) candidates.push({ name: n.research.unlocks[0].name });
     if (!n.icon && n.id) {
       const m = /[A-Za-z]+/.exec(n.id.split(/(?=[A-Z])/).pop());
       if (m && m[0].length >= 4) candidates.push({ name: n.id, fuzzy: m[0].toLowerCase() });

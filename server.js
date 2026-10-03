@@ -84,6 +84,9 @@ function listSprites(dir, base) {
 }
 
 // ---------------------------------------------------------------- scan
+// Extends / Icon inheritance map shared with the /api/icon resolver (module scope).
+const iconChain = {}; // name -> { icon?: string, extends?: string }
+
 function scanMod(modRoot) {
   const modRootAbs = path.resolve(modRoot);
   const configDir = path.join(modRootAbs, 'Config');
@@ -136,6 +139,32 @@ function scanMod(modRoot) {
   for (const f of blockFiles) scanNames(f, /<block\s+name="([^"]+)"/g, nameIndex.blocks);
   for (const f of recipeFiles) scanNames(f, /<recipe\s+name="([^"]+)"/g, nameIndex.recipes);
   const nameIndexOut = { items: [...nameIndex.items], blocks: [...nameIndex.blocks], recipes: [...nameIndex.recipes] };
+
+  // Extends / Icon inheritance (the game resolves block/item icons through these).
+  // Sources: vanilla Data/Config blocks+items (read-only) and the mod's own files.
+  const scanChains = (p) => {
+    if (!fs.existsSync(p)) return;
+    const text = fs.readFileSync(p, 'utf8');
+    const re = /<(block|item)\s+name="([^"]+)"([\s\S]*?)(?=<\1\s|<$)/g;
+    let m;
+    while ((m = re.exec(text))) {
+      const name = m[2];
+      if (iconChain[name]) continue;
+      const body = m[3];
+      const iconM = /<property\s+name="Icon"\s+value="([^"]+)"/.exec(body);
+      const extM = /<property\s+name="Extends"\s+value="([^"]+)"/.exec(body);
+      if (iconM || extM) {
+        iconChain[name] = {
+          icon: iconM ? iconM[1].trim() : undefined,
+          extends: extM ? extM[1].split(',')[0].trim() : undefined,
+        };
+      }
+    }
+  };
+  scanChains(path.join(VANILLA_ROOT, 'Config', 'blocks.xml'));   // vanilla, read-only
+  scanChains(path.join(VANILLA_ROOT, 'Config', 'items.xml'));    // vanilla, read-only
+  for (const f of blockFiles) scanChains(path.join(configDir, f));
+  for (const f of itemFiles) scanChains(path.join(configDir, f));
 
   // user-editable custom dictionary (Key,schinese CSV) — merged last, wins over everything
   let customDictionary = null;
@@ -269,13 +298,27 @@ async function handleApi(req, res, url) {
       path.join(VANILLA_ROOT, 'ItemIcons'), // VANILLA_ROOT already points at <game>\Data
       path.join(MOD_ROOT_DEFAULT, 'UIAtlases', 'UISkills'),
     ];
-    for (const dir of roots) {
-      const p = path.join(dir, safe + '.png');
-      if (fs.existsSync(p)) {
-        const data = fs.readFileSync(p);
+    const fileFor = (n) => {
+      for (const dir of roots) {
+        const p = path.join(dir, n + '.png');
+        if (fs.existsSync(p)) return p;
+      }
+      return null;
+    };
+    // exact file, then walk the game's own inheritance (Icon property -> Extends chain)
+    let cur = safe;
+    const seen = new Set();
+    for (let hop = 0; hop < 12 && cur && !seen.has(cur); hop++) {
+      seen.add(cur);
+      const file = fileFor(cur);
+      if (file) {
+        const data = fs.readFileSync(file);
         res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' });
         return res.end(data);
       }
+      const link = iconChain[cur];
+      if (!link) break;
+      cur = link.icon && !/^ui_game_symbol_/i.test(link.icon) ? link.icon : link.extends;
     }
     if (fuzzy && /^[a-z0-9_]+$/.test(fuzzy) && fuzzy.length >= 3) {
       for (const dir of roots) {

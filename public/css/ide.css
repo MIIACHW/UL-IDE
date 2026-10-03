@@ -148,3 +148,15 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
 dialog input { background: var(--bg3); border: 1px solid var(--line); color: var(--fg); border-radius: 5px; padding: 8px 10px; }
 .dlg-btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
 .dim { color: var(--dim); }
+
+/* Chinese-aware suggestion dropdown */
+.zh-suggest {
+  position: fixed; z-index: 100; background: var(--bg3); border: 1px solid var(--accent);
+  border-radius: 6px; max-height: 240px; overflow-y: auto; box-shadow: 0 6px 20px rgba(0,0,0,.5);
+}
+.zh-suggest-row {
+  display: flex; justify-content: space-between; gap: 12px; padding: 6px 10px;
+  font-size: 12.5px; cursor: pointer;
+}
+.zh-suggest-row:hover, .zh-suggest-row.active { background: #2a3b4d; }
+.zh-suggest-row .dim { color: var(--dim); font-family: Consolas, monospace; font-size: 11px; }
