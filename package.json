@@ -1,0 +1,11 @@
+{
+  "name": "ul-techtree-ide",
+  "version": "1.0.0",
+  "description": "Undead Legacy Tech Tree IDE - edit the UL progression/skill-tree XML with validation, diff, backup and export.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/run-tests.js"
+  }
+}

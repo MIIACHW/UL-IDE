@@ -1,0 +1,4 @@
+backups/
+export/
+*.log
+node_modules/

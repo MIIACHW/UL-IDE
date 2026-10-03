@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Undead Legacy Tech Tree IDE</title>
+<link rel="stylesheet" href="css/ide.css">
+</head>
+<body>
+  <div id="topbar">
+    <span class="brand">UL TechTree IDE</span>
+    <button id="btnOpen" title="打开其他 Mod 文件夹">Open Mod</button>
+    <span class="sep"></span>
+    <button id="btnUndo" title="Ctrl+Z">Undo</button>
+    <button id="btnRedo" title="Ctrl+Y">Redo</button>
+    <span class="sep"></span>
+    <button id="btnValidate" class="accent">Validate</button>
+    <button id="btnDiff">Diff</button>
+    <button id="btnSave" class="primary" title="Ctrl+S — 校验→备份→写入 Mod">Save</button>
+    <button id="btnExport" class="primary">Export</button>
+    <span class="sep"></span>
+    <span class="views">
+      <span class="dim" style="font-size:12px;margin-right:4px">研究树</span>
+      <button id="btnFit" title="F">⤢ 适配</button>
+    </span>
+    <span id="status"></span>
+  </div>
+
+  <div id="main">
+    <div id="left"><div class="panel-label">Technologies</div></div>
+    <div id="center-wrap">
+      <div id="center"></div>
+      <div id="center-hint">滚轮缩放 · 拖动平移 · Shift+拖动框选 · 双击节点聚焦</div>
+    </div>
+    <div id="right"><div class="panel-label">Node Inspector</div><div class="insp-content"></div></div>
+  </div>
+
+  <div id="bottomResizer"></div>
+  <div id="bottom">
+    <div class="bp-inner">
+      <div class="bp-tabs">
+        <button data-tab="problems" class="active">Problems</button>
+        <button data-tab="xml">XML Preview</button>
+        <button data-tab="diff">Diff</button>
+      </div>
+      <div class="bp-body"></div>
+    </div>
+  </div>
+
+  <div id="toasts"></div>
+
+  <dialog id="openDialog">
+    <form method="dialog">
+      <h3>打开 Mod 文件夹</h3>
+      <p class="dim">输入 7 Days to Die Mod 的根目录（包含 ModInfo.xml）：</p>
+      <input id="openPath" type="text" style="width:520px" spellcheck="false">
+      <div class="dlg-btns">
+        <button type="button" id="btnOpenDefault" class="mini">使用当前 Mod (UndeadLegacy)</button>
+        <button type="button" id="btnOpenGo" class="mini primary">扫描并打开</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
