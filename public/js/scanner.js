@@ -19,6 +19,7 @@ export async function scanWorkspace(scanResult, log = () => {}) {
     scannedAt: new Date().toISOString(),
     sourceFiles: [],
     localizationFiles: [],   // [{path, text, bom, lang}]
+    communityLocalization: [], // [{mod, path, text, lang}] — sibling-mod Chinese, load order
     atlases: scanResult.atlases || [],
     vanilla: {},             // {localization: {text, bom, sha1}}
     warnings: [],
@@ -46,6 +47,12 @@ export async function scanWorkspace(scanResult, log = () => {}) {
     }
   }
   log(`本地化文件: ${bundle.localizationFiles.length} 个`);
+
+  // 2b. community Chinese from sibling localization mods (already delivered by the scan)
+  bundle.communityLocalization = scanResult.communityLocalization || [];
+  if (bundle.communityLocalization.length) {
+    log(`社区中文翻译: ${bundle.communityLocalization.map(c => c.mod).join(', ')}`);
+  }
 
   // 3. vanilla reference (read-only): base Localization.txt for key fallback
   try {

@@ -162,6 +162,12 @@ export function buildTechTree(bundle) {
     for (const [k, val] of v.en) if (!tree.localization.en.has(k)) tree.localization.en.set(k, val);
     for (const [k, val] of v.zh) if (!tree.localization.zh.has(k)) tree.localization.zh.set(k, val);
   }
+  // community Chinese (sibling localization mods) — applied last, in load order,
+  // exactly like the game applies them (ZZZZZ_* loads last and wins)
+  for (const cl of bundle.communityLocalization || []) {
+    const m = parseModLocalization(cl.text);
+    for (const [k, val] of m) tree.localization.zh.set(k, val);
+  }
 
   // icons
   for (const a of bundle.atlases) tree.icons.atlases.set(a.atlas, new Set(a.sprites.map(s => s.name)));

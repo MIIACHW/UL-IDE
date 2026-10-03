@@ -120,12 +120,36 @@ function scanMod(modRoot) {
     return { path: f.path, size: f.size, sha1: sha1(buf), bom, text };
   });
 
+  // community/localization mods installed as siblings (e.g. ZZZZZ_XIHE汉化-亡灵遗产).
+  // The game applies mods in alphabetical folder order, so later folders win —
+  // we collect their Simplified Chinese files and overlay them in the same order.
+  const communityLocalization = [];
+  const modsDir = path.dirname(modRootAbs);
+  let siblings; try { siblings = fs.readdirSync(modsDir, { withFileTypes: true }); } catch { siblings = []; }
+  for (const e of siblings.sort((a, b) => a.name.localeCompare(b.name))) {
+    if (!e.isDirectory() || e.name === path.basename(modRootAbs)) continue;
+    const modDir = path.join(modsDir, e.name);
+    if (!fs.existsSync(path.join(modDir, 'ModInfo.xml'))) continue;
+    const locDir = path.join(modDir, 'Config', 'Localization');
+    let locFiles; try { locFiles = fs.readdirSync(locDir, { withFileTypes: true }); } catch { continue; }
+    for (const lf of locFiles) {
+      if (!lf.isFile() || !/schinese/i.test(lf.name)) continue;
+      const abs = path.join(locDir, lf.name);
+      try {
+        const buf = fs.readFileSync(abs);
+        const { bom, text } = detectBom(buf);
+        communityLocalization.push({ mod: e.name, path: `Mods/${e.name}/Config/Localization/${lf.name}`, lang: 'SChinese', text, bom });
+      } catch { /* unreadable sibling — skip */ }
+    }
+  }
+
   return {
     ok: true,
     modRoot: modRootAbs,
     modInfo: { name, displayName: /DisplayName\s+value="([^"]*)"/.exec(modInfoText)?.[1] || name, version },
     sourceFiles,           // tech tree definition files, with content
     localization,          // relative paths
+    communityLocalization, // Chinese localization from sibling mods, in load order
     atlases,               // [{atlas, sprites:[{name, atlas}]}]
     allXmlCount: files.length,
     vanillaConfigRoot: VANILLA_CONFIG_ROOT,
