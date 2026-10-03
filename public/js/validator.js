@@ -102,12 +102,21 @@ export function validate(tree) {
     add(P('error', 'InvalidXML', `${pe.file}:${pe.line} — ${pe.message}`, { sourceFile: pe.file, line: pe.line }));
   }
 
-  // ---- 5. Missing Localization (research desc keys) -------------------------
+  // ---- 5. Missing Localization (research desc + progression name/desc keys) --
   for (const n of tree.nodes) {
-    if (n.descKey && n.descKey !== 'null') {
-      const found = tree.localization.en.has(n.descKey) || tree.localization.zh.has(n.descKey);
+    const keys = [['desc', n.descKey]];
+    if (n.kind !== 'research') keys.push(['name_key', n.nameKey]);
+    for (const [attr, key] of keys) {
+      if (!key || key === 'null') continue;
+      const found = tree.localization.en.has(key) || tree.localization.zh.has(key);
       if (!found) {
-        add(P('warning', 'MissingLocalization', `${n.id}: desc="${n.descKey}" 在 Mod 与本体本地化中均未找到`, { nodeId: n.id, sourceFile: n.sourceFile, line: n.sourceLine }));
+        add(P('warning', 'MissingLocalization', `${n.id}: ${attr}="${key}" 在 Mod 与本体本地化中均未找到`, { nodeId: n.id, sourceFile: n.sourceFile, line: n.sourceLine }));
+      }
+    }
+    for (const p of n.prerequisites || []) {
+      if (!tree.byId.has(p.target)) {
+        add(P('error', 'MissingDependency', `缺失依赖: "${n.id}" ProgressionLevel → "${p.target}" 不存在`,
+          { nodeId: n.id, missingTarget: p.target, sourceFile: n.sourceFile, line: p.ref?.line || n.sourceLine }));
       }
     }
   }
