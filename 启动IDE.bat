@@ -1,6 +1,14 @@
 @echo off
-title UL Research Tree IDE
+title UL Tech Tree IDE
 cd /d "%~dp0"
+
+rem Port selection lives exclusively in server.js (UL_IDE_PORT env var -> 8899
+rem default, auto-increment while busy). This launcher NEVER guesses the port:
+rem launch.mjs reuses a healthy instance found via .runtime/instance.json +
+rem /api/health, otherwise it starts the server, polls /api/health and opens the
+rem REAL url from the health response. To pin a port, run:
+rem     set UL_IDE_PORT=9000
+rem before starting (or set it permanently in your user environment).
 
 where node >nul 2>nul
 if errorlevel 1 (
@@ -9,14 +17,5 @@ if errorlevel 1 (
   exit /b 1
 )
 
-set PORT=8899
-if defined UL_IDE_PORT set PORT=%UL_IDE_PORT%
-
-rem If an IDE instance is already listening, just open it; otherwise start one
-rem (the server opens the browser by itself once it is up).
-node -e "fetch('http://localhost:%PORT%/api/langs').then(()=>process.exit(0)).catch(()=>process.exit(1))"
-if not errorlevel 1 (
-  start "" "http://localhost:%PORT%"
-) else (
-  node server.js
-)
+node launch.mjs
+if errorlevel 1 pause

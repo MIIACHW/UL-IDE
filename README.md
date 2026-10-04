@@ -2,6 +2,8 @@
 
 A local visual editor for the **research tree** of [Undead Legacy](http://ul.subquake.com) (7 Days to Die). Drop it into your game's `Mods/` folder, double-click `启动IDE.bat`, and every installed mod's research tree opens as an interactive graph — edit nodes, rename with automatic reference updates, tweak unlocks and costs, then export with full validation and automatic backup.
 
+**This is a local Node.js application, not a website.** It runs on your machine only — there is nothing hosted here (this repository is not a GitHub Pages site); opening the files directly in a browser or hosting them does nothing. You need Node.js 18+ installed, the server started (`启动IDE.bat` does it for you), and then a browser pointed at the local URL it prints.
+
 **Safety rails.** Every export is validated (errors block writing), original files are backed up automatically, files you never touch are re-serialized byte-for-byte identical, and unknown XML data is always preserved.
 
 **Scope.** The research tree (`Config/Custom/recipes_research.xml`) is the main feature, covering all installed mods at once. The progression tree (`Config/progression.xml`, vanilla perk/skill format) is optional and off by default. The radial skill layouts in `Config/Custom/recipes_skills.xml` are out of scope.
@@ -24,7 +26,7 @@ No build step, no dependencies — just Node.js 18+ and a browser.
 ## Getting started
 
 1. Put this folder anywhere inside the game's `Mods/` directory (e.g. `Mods/ULTechTreeIDE/`). It does not affect the game while you edit — changes reach the game only after export.
-2. **Double-click `启动IDE.bat`** — it starts the server and opens the IDE in your browser (if it is already running, it just opens the page). Requires Node.js 18+.
+2. **Double-click `启动IDE.bat`** (recommended). The launcher checks Node.js, reuses an already-running IDE instance if one answers its health check, otherwise starts `node server.js`, waits for the health check, and opens the **real** URL in your browser.
 
    Or start it manually:
 
@@ -32,17 +34,30 @@ No build step, no dependencies — just Node.js 18+ and a browser.
    node server.js      # or: npm start
    ```
 
-3. Open <http://localhost:8899> if the browser did not open by itself. The IDE scans the `Mods/` folder that contains it and loads the research tree automatically.
+3. **Never assume port 8899.** 8899 is only the default preferred port — when it is busy the server automatically picks the next free one, and `UL_IDE_PORT` can point it anywhere else. The console banner, the launcher output and <http://127.0.0.1:8899/api/health> (on whatever port it actually took) always tell you the real address.
 
-> The browser auto-open can be disabled with `UL_NO_BROWSER=1` (useful for scripted runs).
+The launcher itself opens the browser; set `UL_NO_BROWSER=1` to skip that (scripted runs). The server never opens a browser by itself.
+
+## Startup, ports & diagnostics
+
+- **Port management lives only in `server.js`.** Resolution order: `UL_IDE_PORT` → `8899`; while the preferred port is busy it walks upward (a few attempts). To pin a port: `set UL_IDE_PORT=9000` before starting (the `.bat` passes your environment through to Node).
+- **`GET /api/health`** is the only accepted proof that a port is running this IDE:
+  ```json
+  { "ok": true, "service": "UL-IDE", "version": "1.1.0", "pid": 12345, "host": "127.0.0.1", "port": 8899 }
+  ```
+  Anything else answering on a port — an unrelated HTTP server, an old IDE build — is not trusted, even if the port responds.
+- **`.runtime/instance.json`** is written by the server once it is actually listening (`pid`, `host`, `port`, `url`, `startedAt`) and deleted on clean shutdown. It is a *hint* for the launcher: after a crash it may go stale, so the launcher always re-verifies it through `/api/health` before reusing it — and removes the stale file otherwise. The folder is gitignored.
+- **Already-running detection:** `启动IDE.bat` (via `launch.mjs`) reads the instance file, asks `/api/health`, and if a healthy UL-IDE answers it just opens that URL instead of starting a second server.
+- **Mods folder detection** (highest priority first): `UL_MODS_DIR` → the folder holding the IDE contains a `ModInfo.xml` (IDE inside a single mod) → the folder holding the IDE *is* the `Mods` folder (by name or because a sibling folder ships `ModInfo.xml`) → walking up the tree to any `<…>/7 Days To Die/Mods`. If nothing matches, the server still starts but warns loudly and scans nothing until you point it somewhere. **`/api/defaults` always returns the resolved `modsDir`** (plus `modsDirSource` / `modsDirWarning`) — check it when scans come up empty.
 
 ### Configuration
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `UL_IDE_PORT` | server port | `8899` (auto-increments when busy) |
-| `UL_MODS_DIR` | Mods folder to scan | parent of this folder |
+| `UL_IDE_PORT` | preferred server port (auto-increments while busy; the server owns the final choice) | `8899` |
+| `UL_MODS_DIR` | Mods folder to scan | auto-detected (see *Startup, ports & diagnostics*) |
 | `UL_VANILLA_CONFIG` | game `Data/Config` folder (read-only, for name/icon lookups) | **auto-detected**: the game folder containing the Mods folder, then Steam libraries (`libraryfolders.vdf` + Windows registry + common drives) |
+| `UL_NO_BROWSER` | `1` stops the *launcher* from opening the browser (the server never opens one) | unset |
 
 `UL_VANILLA_CONFIG` only needs to be set when auto-detection fails (unusual install layout) — without it the IDE still works, but vanilla localization fallback and icons are limited (the server log tells you when that happens). Added language files live in `langs/`, backups in `backups/`, export copies in `export/`.
 
@@ -62,10 +77,12 @@ Left panel → *Language files* → **Add language file**: pick a UTF-8 two-colu
 ## Testing
 
 ```bash
-npm test
+npm test        # core regression (round-trip, parser, commands…) + startup tests
+node test/run-tests.js      # core regression only
+node test/startup.test.js   # startup tests only: /api/health, ports, instance file, launcher
 ```
 
-Set `UL_VANILLA_ROOT` to your game folder to enable the vanilla-localization assertions (skipped automatically when not available).
+The startup tests spawn real `node server.js` / `node launch.mjs` processes on 127.0.0.1. They use port 8899 for the default-port assertion when it is free, and fall back to asserting an incremented port when something already occupies it (e.g. your running IDE). Set `UL_VANILLA_ROOT` to your game folder to enable the vanilla-localization assertions in the core suite (skipped automatically when not available).
 
 ## Notices
 

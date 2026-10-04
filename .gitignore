@@ -1,6 +1,7 @@
 backups/
 export/
 langs/
+.runtime/
 *.log
 node_modules/
 

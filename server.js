@@ -5,22 +5,62 @@
 //   progression-style — files containing vanilla-format <perk/skill/book/attribute>
 // Read roots: every scanned mod + vanilla game Data. Write roots: scanned mods' Config/*.xml,
 // always after backup. A user dictionary (dictionary.csv) supplies extra translations.
+//
+// Startup contract (see launch.mjs / 启动IDE.bat — the browser is opened there, not here):
+//   - server.js is the ONLY port manager: UL_IDE_PORT (default 8899) is preferred, auto-increments when busy
+//   - /api/health identifies the service (service === "UL-IDE") — the only accepted proof of liveness
+//   - .runtime/instance.json is written once listening (pid/host/port/url/startedAt) and removed on clean exit
 import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { exec, execSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const IDE_ROOT = __dirname;
 const IDE_PARENT = path.resolve(__dirname, '..');
-// Mods dir = the folder that contains the IDE folder, unless the IDE sits inside a
-// single mod (that folder has ModInfo.xml) — then go one level higher.
-const MODS_DIR = process.env.UL_MODS_DIR
-  ? path.resolve(process.env.UL_MODS_DIR)
-  : (fs.existsSync(path.join(IDE_PARENT, 'ModInfo.xml')) ? path.dirname(IDE_PARENT) : IDE_PARENT);
+// Mods dir detection — priority:
+//   1. UL_MODS_DIR env (explicit override, honored as-is even if unreadable — the scan reports the error)
+//   2. the folder holding the IDE contains ModInfo.xml → the IDE sits inside a single mod → one level up
+//   3. the folder holding the IDE IS a Mods folder (named "Mods", or a sibling folder ships ModInfo.xml)
+//   4. walk up the directory tree looking for "<anywhere>/7 Days To Die/Mods"
+//   5. give up with an explicit warning — never silently scan a wrong directory
+function detectModsDir() {
+  if (process.env.UL_MODS_DIR) {
+    return { dir: path.resolve(process.env.UL_MODS_DIR), source: 'UL_MODS_DIR' };
+  }
+  if (fs.existsSync(path.join(IDE_PARENT, 'ModInfo.xml'))) {
+    return { dir: path.dirname(IDE_PARENT), source: 'mod-parent' };
+  }
+  try {
+    const namedMods = path.basename(IDE_PARENT).toLowerCase() === 'mods';
+    const siblingMod = fs.readdirSync(IDE_PARENT, { withFileTypes: true })
+      .some((e) => e.isDirectory() && fs.existsSync(path.join(IDE_PARENT, e.name, 'ModInfo.xml')));
+    if (namedMods || siblingMod) return { dir: IDE_PARENT, source: 'mods-sibling' };
+  } catch { /* unreadable parent */ }
+  let cur = path.resolve(IDE_PARENT);
+  for (;;) {
+    try {
+      const game = fs.readdirSync(cur, { withFileTypes: true })
+        .find((e) => e.isDirectory() && e.name.toLowerCase() === '7 days to die');
+      if (game && fs.existsSync(path.join(cur, game.name, 'Mods'))) {
+        return { dir: path.join(cur, game.name, 'Mods'), source: 'walk-up' };
+      }
+    } catch { /* unreadable level */ }
+    const parent = path.dirname(cur);
+    if (parent === cur) break;
+    cur = parent;
+  }
+  return {
+    dir: null,
+    source: 'not-found',
+    warning: 'No Mods folder detected — put this folder inside the game\'s Mods directory, set UL_MODS_DIR, or POST /api/scan with an explicit path. Nothing is scanned until then.',
+  };
+}
+const MODS_DETECTED = detectModsDir();
+const MODS_DIR = MODS_DETECTED.dir;
 // Vanilla game Data/Config (read-only) — used for localization-key fallback and icons.
 // Resolution order: UL_VANILLA_CONFIG env → the game folder containing the Mods folder
 // (IDE placed in-game) → Steam libraries (libraryfolders.vdf, Windows registry, common
@@ -69,8 +109,28 @@ const BACKUP_DIR = path.join(IDE_ROOT, 'backups');
 const EXPORT_DIR = path.join(IDE_ROOT, 'export');
 // user-added language files (Key,<translation> CSV) — extra search languages
 const LANGS_DIR = path.join(IDE_ROOT, 'langs');
-const PORT = Number(process.env.UL_IDE_PORT || 8899);
+// server.js is the SINGLE port manager: UL_IDE_PORT (default 8899) is only the
+// PREFERRED port — listen() walks upward while it is busy. Nothing else (bat,
+// launcher, UI) may guess the final port; they discover it via /api/health.
+const PREFERRED_PORT = (() => {
+  const raw = process.env.UL_IDE_PORT;
+  if (raw === undefined || raw === '') return 8899;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 65535) {
+    console.error(`[ul-ide] invalid UL_IDE_PORT "${raw}" — must be an integer between 1 and 65535.`);
+    process.exit(1);
+  }
+  return n;
+})();
+let ACTUAL_PORT = null; // set once the server is actually listening; /api/health reports it
+// runtime instance file — a HINT for the launcher, always re-verified via /api/health
+const RUNTIME_DIR = path.join(IDE_ROOT, '.runtime');
+const INSTANCE_FILE = path.join(RUNTIME_DIR, 'instance.json');
 const PUBLIC_DIR = path.join(IDE_ROOT, 'public');
+const VERSION = (() => {
+  try { return JSON.parse(fs.readFileSync(path.join(IDE_ROOT, 'package.json'), 'utf8')).version || '0.0.0'; }
+  catch { return '0.0.0'; }
+})();
 
 function langFileName(name) {
   const safe = String(name || '').replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^\.+/, '').slice(0, 64);
@@ -163,7 +223,13 @@ let fuzzyDirs = [];        // dirs to search for fuzzy matches (set per scan)
 function scanMods(modsDir) {
   const mods = [];
   let entries; try { entries = fs.readdirSync(modsDir, { withFileTypes: true }); } catch (e) {
-    return { ok: false, error: 'Cannot read Mods folder ' + modsDir + ': ' + e.message };
+    return {
+      ok: false,
+      modsDir: modsDir || null,
+      error: modsDir
+        ? 'Cannot read Mods folder ' + modsDir + ': ' + e.message
+        : 'No Mods folder detected (see modsDirSource / modsDirWarning) — nothing is scanned.',
+    };
   }
   for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     if (!e.isDirectory()) continue;
@@ -354,12 +420,27 @@ function readVanillaFile(rel) {
 async function handleApi(req, res, url) {
   const route = url.pathname;
 
+  // Identity endpoint — the ONLY accepted proof that a port is running this IDE.
+  // The launcher, tests and scripts must match on service === "UL-IDE"; "some HTTP
+  // response" or a live PID proves nothing.
+  if (route === '/api/health' && req.method === 'GET') {
+    return send(res, 200, { ok: true, service: 'UL-IDE', version: VERSION, pid: process.pid, host: '127.0.0.1', port: ACTUAL_PORT });
+  }
+
   if (route === '/api/defaults' && req.method === 'GET') {
-    return send(res, 200, scanMods(MODS_DIR));
+    // always echoes the resolved modsDir (+ how it was found) so mis-detection is diagnosable
+    const scan = scanMods(MODS_DIR);
+    return send(res, 200, {
+      ...scan,
+      modsDir: MODS_DIR,
+      modsDirSource: MODS_DETECTED.source,
+      ...(MODS_DETECTED.warning ? { modsDirWarning: MODS_DETECTED.warning } : {}),
+    });
   }
   if (route === '/api/scan' && req.method === 'POST') {
     const body = JSON.parse((await readBody(req)) || '{}');
     let dir = body.path || MODS_DIR;
+    if (!dir) return sendErr(res, 400, 'No default Mods folder detected — pass {"path": "..."} pointing at the game Mods folder, or start the server with UL_MODS_DIR set.');
     // accept either a Mods folder or a single mod folder
     if (fs.existsSync(path.join(dir, 'ModInfo.xml'))) dir = path.dirname(dir);
     return send(res, 200, scanMods(dir));
@@ -370,6 +451,7 @@ async function handleApi(req, res, url) {
   if (route === '/api/readmod' && req.method === 'GET') {
     const rel = url.searchParams.get('path') || '';
     const root = url.searchParams.get('root') || MODS_DIR;
+    if (!root) return sendErr(res, 400, 'No default Mods root detected — pass ?root=... with the request.');
     const abs = normalizeInside(root, rel);
     if (!abs) return sendErr(res, 403, 'Path outside allowed root');
     try {
@@ -483,19 +565,38 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-// Auto-open the IDE in the default browser once the server is listening — makes any
-// launch method (double-click 启动IDE.bat, terminal, shortcut) a one-step experience.
-// Set UL_NO_BROWSER=1 to disable (e.g. for scripted runs and tests).
-function openBrowser(url) {
-  if (process.env.UL_NO_BROWSER === '1') {
-    console.log('[ul-ide] browser auto-open disabled (UL_NO_BROWSER=1): ' + url);
-    return;
+// ---------------------------------------------------------------- runtime instance file
+// Written once the server is actually listening; removed on clean shutdown. It is a
+// HINT for the launcher — which still verifies via /api/health before trusting it,
+// because a crash can leave a stale file behind. server.js itself never opens a
+// browser (that is launch.mjs's job); UL_NO_BROWSER is therefore not used here.
+function writeInstanceFile(port) {
+  try {
+    fs.mkdirSync(RUNTIME_DIR, { recursive: true });
+    const inst = {
+      pid: process.pid,
+      host: '127.0.0.1',
+      port,
+      url: `http://127.0.0.1:${port}`,
+      startedAt: new Date().toISOString(),
+    };
+    fs.writeFileSync(INSTANCE_FILE, JSON.stringify(inst, null, 2) + '\n');
+  } catch (e) {
+    console.warn('[ul-ide] could not write .runtime/instance.json: ' + e.message);
   }
-  const cmd = process.platform === 'win32' ? `start "" "${url}"`
-    : process.platform === 'darwin' ? `open "${url}"`
-    : `xdg-open "${url}"`;
-  exec(cmd, () => { /* best effort */ });
-  console.log('[ul-ide] opening browser: ' + url);
+}
+function removeInstanceFile() {
+  try {
+    let mine = true;
+    try { mine = JSON.parse(fs.readFileSync(INSTANCE_FILE, 'utf8')).pid === process.pid; } catch { /* absent or garbage */ }
+    if (!mine) return; // a newer instance owns the record — leave it alone
+    fs.rmSync(INSTANCE_FILE, { force: true });
+    try { fs.rmdirSync(RUNTIME_DIR); } catch { /* not empty / already gone */ }
+  } catch { /* best effort — the launcher re-verifies via /api/health anyway */ }
+}
+process.on('exit', removeInstanceFile);
+for (const sig of process.platform === 'win32' ? ['SIGINT', 'SIGTERM', 'SIGBREAK', 'SIGHUP'] : ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  try { process.on(sig, () => process.exit(0)); } catch { /* unsupported signal */ }
 }
 
 function listen(port, attempts = 10) {
@@ -504,17 +605,21 @@ function listen(port, attempts = 10) {
     else { console.error('[ul-ide] server error:', e.message); process.exit(1); }
   });
   server.listen(port, '127.0.0.1', () => {
+    ACTUAL_PORT = port;
+    writeInstanceFile(port);
     console.log('==========================================================');
-    console.log(' 7DTD Tech Tree IDE (multi-mod)');
-    console.log(` Open in browser:  http://localhost:${port}`);
-    console.log(` Mods folder:      ${MODS_DIR}`);
+    console.log(` UL Tech Tree IDE (multi-mod)  v${VERSION}`);
+    console.log(` URL:              http://127.0.0.1:${port}`);
+    console.log(` Health:           http://127.0.0.1:${port}/api/health`);
+    console.log(` Instance file:    ${INSTANCE_FILE}`);
+    console.log(` Mods folder:      ${MODS_DIR || '(none detected)'}${MODS_DIR ? `  (source: ${MODS_DETECTED.source})` : ''}`);
     console.log(` Vanilla configs:  ${VANILLA_CONFIG_ROOT} (read-only)`);
     console.log('==========================================================');
-    openBrowser(`http://localhost:${port}`);
+    if (MODS_DETECTED.warning) console.warn('[ul-ide] WARNING: ' + MODS_DETECTED.warning);
     if (!fs.existsSync(path.join(VANILLA_CONFIG_ROOT, 'Localization.txt'))) {
       console.warn('[ul-ide] vanilla Data/Config not found — localization-key fallback and vanilla icons are limited.');
       console.warn('[ul-ide] set UL_VANILLA_CONFIG to your game\'s Data/Config folder to enable them.');
     }
   });
 }
-listen(PORT);
+listen(PREFERRED_PORT);
