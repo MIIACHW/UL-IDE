@@ -9,6 +9,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { exec } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -439,6 +440,21 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+// Auto-open the IDE in the default browser once the server is listening — makes any
+// launch method (double-click 启动IDE.bat, terminal, shortcut) a one-step experience.
+// Set UL_NO_BROWSER=1 to disable (e.g. for scripted runs and tests).
+function openBrowser(url) {
+  if (process.env.UL_NO_BROWSER === '1') {
+    console.log('[ul-ide] browser auto-open disabled (UL_NO_BROWSER=1): ' + url);
+    return;
+  }
+  const cmd = process.platform === 'win32' ? `start "" "${url}"`
+    : process.platform === 'darwin' ? `open "${url}"`
+    : `xdg-open "${url}"`;
+  exec(cmd, () => { /* best effort */ });
+  console.log('[ul-ide] opening browser: ' + url);
+}
+
 function listen(port, attempts = 10) {
   server.once('error', (e) => {
     if (e.code === 'EADDRINUSE' && attempts > 0) { console.log(`[ul-ide] port ${port} busy, trying ${port + 1}`); listen(port + 1, attempts - 1); }
@@ -451,6 +467,7 @@ function listen(port, attempts = 10) {
     console.log(` Mods folder:      ${MODS_DIR}`);
     console.log(` Vanilla configs:  ${VANILLA_CONFIG_ROOT} (read-only)`);
     console.log('==========================================================');
+    openBrowser(`http://localhost:${port}`);
   });
 }
 listen(PORT);

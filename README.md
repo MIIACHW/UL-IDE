@@ -21,13 +21,17 @@ A local editor for the **research tree** of [Undead Legacy](http://ul.subquake.c
 ## Getting started
 
 1. Put this folder anywhere inside the game's `Mods/` directory (e.g. `Mods/ULTechTreeIDE/`). It does not affect the game while you edit — changes reach the game only after export.
-2. Start the server:
+2. **Double-click `启动IDE.bat`** — it starts the server and opens the IDE in your browser (if it is already running, it just opens the page). Requires Node.js 18+.
+
+   Or start it manually:
 
    ```bash
    node server.js      # or: npm start
    ```
 
-3. Open <http://localhost:8899> in your browser. The IDE scans the `Mods/` folder that contains it and loads the research tree automatically.
+3. Open <http://localhost:8899> if the browser did not open by itself. The IDE scans the `Mods/` folder that contains it and loads the research tree automatically.
+
+> The browser auto-open can be disabled with `UL_NO_BROWSER=1` (useful for scripted runs).
 
 ### Configuration
 
