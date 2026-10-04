@@ -1,10 +1,12 @@
 # Undead Legacy Research Tree IDE
 
-A local editor for the **research tree** of [Undead Legacy](http://ul.subquake.com) (7 Days to Die). It scans the tech-tree XML files of every installed mod, shows the research tree as an interactive graph, and writes your edits back to the mod folder with validation, diff and automatic backup.
+A local visual editor for the **research tree** of [Undead Legacy](http://ul.subquake.com) (7 Days to Die). Drop it into your game's `Mods/` folder, double-click `启动IDE.bat`, and every installed mod's research tree opens as an interactive graph — edit nodes, rename with automatic reference updates, tweak unlocks and costs, then export with full validation and automatic backup.
 
-- Main data source: `Config/Custom/recipes_research.xml` (research unlocks, ingredient costs, icons)
-- The progression tree (`Config/progression.xml`, vanilla perk/skill format) is optional and off by default; the radial skill layouts in `Config/Custom/recipes_skills.xml` are not part of this editor
-- Zero dependencies — Node.js 18+ is all it needs, and everything runs on your machine
+**Safety rails.** Every export is validated (errors block writing), original files are backed up automatically, files you never touch are re-serialized byte-for-byte identical, and unknown XML data is always preserved.
+
+**Scope.** The research tree (`Config/Custom/recipes_research.xml`) is the main feature, covering all installed mods at once. The progression tree (`Config/progression.xml`, vanilla perk/skill format) is optional and off by default. The radial skill layouts in `Config/Custom/recipes_skills.xml` are out of scope.
+
+No build step, no dependencies — just Node.js 18+ and a browser.
 
 ## Features
 
