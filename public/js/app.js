@@ -10,7 +10,7 @@ import { createInspector } from './inspector.js';
 import { createLeftPanel, createBottomPanel } from './panels.js';
 import { createExporter } from './exporter.js';
 import { validate } from './validator.js';
-import { generateFiles, isDirty } from './generator.js';
+import { generateFiles, getGenerateFilesCalls } from './generator.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -32,7 +32,42 @@ let leftPanel = null;
 let bottom = null;
 let exporter = null;
 const commands = new CommandStack();
-let droppedSources = []; // [{mod:'(drop)', modRoot:null, path, role, text, bom, sha1}]
+let droppedSources = [];
+let includeProgression = false; // explicit opt-in — progression files never load by default
+// dirty cache — updated only when a command actually mutates a DOM (never on selection)
+const dirtyFiles = new Set();
+let dirty = false;
+function markDirty(fileKey) {
+  if (fileKey) dirtyFiles.add(fileKey);
+  dirty = true;
+}
+function clearDirty() { dirtyFiles.clear(); dirty = false; }
+// precise recompute (serialize once per file) — used by Undo/Redo, not by clicks
+function recomputeDirty() {
+  window.__dirtyLog = window.__dirtyLog || [];
+  window.__dirtyLog.push('recompute:enter dirty=' + dirty + ' files=' + [...dirtyFiles].join('|'));
+  if (!tree) { clearDirty(); return; }
+  const files = generateFiles(tree);
+  dirtyFiles.clear();
+  for (const [key, text] of Object.entries(files)) {
+    const sf = tree.sourceFiles.find(f => `${f.mod}/${f.path}` === key);
+    if (!sf) { dirtyFiles.add(key); continue; }
+    let cmp = text;
+    if (cmp.charCodeAt(0) === 0xFEFF) cmp = cmp.slice(1);
+    if (sf.text !== cmp) {
+      dirtyFiles.add(key);
+      window.__recomputeDiff = { key, at: (function () { const a = sf.text, b = cmp; for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) return i; return -1; })(), sfLen: sf.text.length, cmpLen: cmp.length, sfDomLen: serializeLength(sf.dom) };
+    }
+  }
+  dirty = dirtyFiles.size > 0;
+  window.__dirtyLog.push('recompute:exit dirty=' + dirty + ' files=' + [...dirtyFiles].join('|'));
+}
+function serializeLength(dom) {
+  try {
+    const mod = window.__lenProbe;
+    return -1;
+  } catch (e) { return -1; }
+} // [{mod:'(drop)', modRoot:null, path, role, text, bom, sha1}]
 
 function toast(msg, kind = 'info') {
   const t = document.createElement('div');
@@ -44,14 +79,12 @@ function toast(msg, kind = 'info') {
 
 function updateStatus(extra = '') {
   if (!tree) { ui.status.textContent = '未加载'; return; }
-  const files = generateFiles(tree);
-  const dirty = isDirty(tree, files);
+  // uses the dirty cache — selecting/panning/zooming never serializes XML here
   const sel = graph?.state.selected.size || 0;
-  const modCount = new Set(tree.nodes.map(n => n.sourceMod)).size;
   ui.status.innerHTML =
     `<b>${tree.mods?.length || 0} 个 Mod</b>` +
     ` · 节点 ${tree.nodes.length} · 边 ${tree.edges.length}` +
-    ` · <span class="${dirty ? 'dirty' : 'clean'}">${dirty ? '● 有未导出修改' : '○ 与原始文件一致'}</span>` +
+    ` · <span class="${dirty ? 'dirty' : 'clean'}">${dirty ? `● 有未导出修改 (${dirtyFiles.size} 文件)` : '○ 与原始文件一致'}</span>` +
     ` · 选中 ${sel}` +
     (commands.canUndo ? ` · 撤销可用: ${commands.label}` : '') +
     (extra ? ` · ${extra}` : '');
@@ -68,8 +101,7 @@ function runValidation(silent = false) {
     const cur = map.get(p.nodeId);
     if (!cur || rank[p.severity] < rank[cur]) map.set(p.nodeId, p.severity);
   }
-  graph.setProblemNodes(map);
-  graph.render();
+  graph.setProblemNodes(map); // incremental problem-marker update — no full render
   bottom.render();
   updateStatus(`validation: ✖${result.summary.errors} ⚠${result.summary.warnings} ℹ${result.summary.infos}`);
   if (!silent) {
@@ -80,6 +112,7 @@ function runValidation(silent = false) {
 }
 
 async function loadWorkspace(modsDirArg, scanResult) {
+  clearDirty();
   let scan = scanResult;
   if (!scan) {
     toast('扫描 Mods 文件夹…');
@@ -87,7 +120,7 @@ async function loadWorkspace(modsDirArg, scanResult) {
     if (!scan.ok) { toast(scan.error, 'error'); return false; }
   }
   const log = (m) => console.log('[scan] ' + m);
-  const bundle = await scanWorkspace(scan, log);
+  const bundle = await scanWorkspace(scan, log, { includeProgression });
   bundle.sourceFiles.push(...droppedSources);
   for (const w of bundle.warnings) console.warn('[scan] ' + w);
   tree = buildTechTree(bundle);
@@ -98,16 +131,21 @@ async function loadWorkspace(modsDirArg, scanResult) {
   ctx = { tree, modsDir: bundle.modsDir, cmd, onDirty, refresh: () => { graph.render(); inspector.refresh(); }, filter: null, problems: null, locate, showXml, onError: (m) => toast(m, 'error') };
   initPanels();
   leftPanel.render();
+  restorePositions(); // view state only — picked up by the single initial render below
   graph.render();
-  graph.fitView({ minScale: 0.55 });
   runValidation(true);
   updateStatus();
+  graph.fitView({ minScale: 0.55 }); // LAST — the transform must survive everything above
   toast(`已加载 ${bundle.mods.length} 个 Mod: ${tree.nodes.length} 节点 / ${tree.edges.length} 边（${[...new Set(tree.nodes.map(n => n.sourceMod))].length} 个 Mod 含科技树）`, 'ok');
   return true;
 }
 
 function cmd(factory) {
-  try { commands.push(factory()); }
+  try {
+    const c = commands.push(factory());
+    if (c && c.fileKey) markDirty(c.fileKey); else markDirty(null);
+    updateStatus();
+  }
   catch (e) { toast('操作失败: ' + e.message, 'error'); }
 }
 function onDirty() {
@@ -115,7 +153,7 @@ function onDirty() {
   clearTimeout(onDirty._t);
   onDirty._t = setTimeout(() => runValidation(true), 400);
   inspector.refresh();
-  graph.render();
+  graph.syncModel(); // incremental DOM/edge sync — no full rebuild, no XML serialization
 }
 function locate(id) {
   const n = tree.byId.get(id);
@@ -159,8 +197,15 @@ function initPanels() {
     get problems() { return ctx.problems; },
   });
   ctx.showProblems = () => { bottom.switchTo('problems'); bottom.render(); };
+  ctx.onIncludeProgression = (v) => {
+    if (v === includeProgression) return;
+    if (dirty && !confirm('重新加载将丢弃未导出的修改。继续?')) { leftPanel.render(); return; }
+    includeProgression = v;
+    loadWorkspace(null, window.__lastScan);
+  };
   exporter = createExporter({
     tree, modsDir: ctx.modsDir,
+    isDirty: () => dirty,
     showProblems: () => ctx.showProblems(),
     toast,
     log: (m) => console.log('[export] ' + m),
@@ -171,8 +216,8 @@ function initPanels() {
   $('#btnDiff').onclick = () => { bottom.switchTo('diff'); bottom.render(); };
   $('#btnExport').onclick = () => exporter.run({ confirmWrite: true }).then(r => { if (r?.ok) updateStatus(); });
   $('#btnSave').onclick = () => exporter.run({ confirmWrite: true }).then(r => { if (r?.ok) updateStatus(); });
-  $('#btnUndo').onclick = () => { const c = commands.undo(); if (c) { onDirty(); toast('撤销: ' + c.label); } };
-  $('#btnRedo').onclick = () => { const c = commands.redo(); if (c) { onDirty(); toast('重做: ' + c.label); } };
+  $('#btnUndo').onclick = () => { try { const c = commands.undo(); if (c) { recomputeDirty(); onDirty(); toast('撤销: ' + c.label); } } catch (e) { toast('撤销失败: ' + e.message, 'error'); console.error(e); } };
+  $('#btnRedo').onclick = () => { const c = commands.redo(); if (c) { recomputeDirty(); onDirty(); toast('重做: ' + c.label); } };
   $('#btnOpen').onclick = () => ui.openDialog.showModal();
   $('#btnOpenGo').onclick = async () => {
     const path = $('#openPath').value.trim();
@@ -212,12 +257,11 @@ window.addEventListener('drop', async (ev) => {
   ev.preventDefault();
   const files = [...(ev.dataTransfer?.files || [])].filter(f => /\.xml$/i.test(f.name));
   if (!files.length) { toast('请拖入 .xml 文件', 'error'); return; }
-  const dirty = tree ? isDirty(tree, generateFiles(tree)) : false;
   if (dirty && !confirm('拖入将按当前扫描+已拖入文件重建模型，未导出的修改会丢失。继续?')) return;
   let added = 0, skipped = 0;
   for (const f of files) {
     const text = await f.text();
-    const role = classifyXml(text);
+    const role = classifyXml(text, f.name);
     if (!role) { skipped++; toast(`无法识别 ${f.name}（未找到 research/progression 结构）`, 'error'); continue; }
     droppedSources = droppedSources.filter(s => s.path !== '(drop)/' + f.name);
     droppedSources.push({ mod: '(拖入)', modRoot: null, path: '(drop)/' + f.name, role, text, bom: null, sha1: '' });
@@ -242,21 +286,34 @@ window.addEventListener('beforeunload', () => {
 function restorePositions() {
   try {
     const pos = JSON.parse(localStorage.getItem('ul-ide-pos') || '{}');
-    for (const n of tree.nodes) if (pos[n.id]) n.pos = pos[n.id];
+    for (const n of tree.nodes) {
+      const p = pos[n.id];
+      // only finite numeric positions are restorable — NaN/garbage would poison
+      // the layout and leave the graph unviewable
+      if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) n.pos = { x: p.x, y: p.y };
+    }
   } catch { /* ignore */ }
 }
 
 (async function boot() {
-  window.addEventListener('error', (e) => console.error('[ide]', e.message));
+  window.addEventListener('error', (e) => { (window.__errs = window.__errs || []).push(e.message + ' @ ' + (e.filename || '').split('/').pop() + ':' + e.lineno); console.error('[ide]', e.message); });
   window.__ide = { get tree() { return tree; }, get graph() { return graph; }, get ctx() { return ctx; }, runValidation, loadWorkspace };
+  window.__ide.debug = {
+    get fullRenders() { return graph?.stats?.fullRenders ?? 0; },
+    get selectionUpdates() { return graph?.stats?.selectionUpdates ?? 0; },
+    get nodeCreates() { return graph?.stats?.nodeCreates ?? 0; },
+    get edgeCreates() { return graph?.stats?.edgeCreates ?? 0; },
+    get iconRequests() { return graph?.stats?.iconRequests ?? 0; },
+    get generateFilesCalls() { return getGenerateFilesCalls(); },
+    get dirtyFiles() { return [...dirtyFiles]; },
+    get dirty() { return dirty; },
+  };
   try {
     const scan = await apiDefaults();
     window.__lastScan = scan.ok ? scan : null;
     if (scan.ok) {
       $('#openPath').value = scan.modsDir;
       await loadWorkspace(scan.modsDir, scan);
-      restorePositions();
-      graph.render();
     } else {
       toast(scan.error || '自动扫描失败 — 请通过 Open Mod 手动指定 Mods 目录', 'error');
       ui.openDialog.showModal();

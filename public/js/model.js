@@ -53,6 +53,7 @@ export class CommandStack {
     this.undoStack.push(cmd);
     this.redoStack.length = 0;
     this.emit();
+    return cmd;
   }
   undo() {
     const cmd = this.undoStack.pop();
@@ -76,6 +77,18 @@ export class CommandStack {
 }
 
 function getAttrSafe(el, name) { const a = el.attrs.find(x => x.name === name); return a ? a.decoded : undefined; }
+
+// Locate "<Mod>/<Config-relative path>" for the file containing this DOM element —
+// lets each command report which source file it mutated (for the dirty cache).
+function fileKeyOf(tree, dom) {
+  let cur = dom;
+  while (cur) {
+    for (const sf of tree.sourceFiles) if (sf.dom === cur) return `${sf.mod}/${sf.path}`;
+    cur = cur.parent;
+  }
+  return null;
+}
+function nodeFileKey(tree, node) { return node?.dom ? fileKeyOf(tree, node.dom) : null; }
 function setAttrOnDom(el, name, value) {
   if (value === undefined || value === null) {
     el.attrs = el.attrs.filter(x => x.name !== name);
@@ -91,6 +104,7 @@ function setAttrOnDom(el, name, value) {
 export function cmdSetAttr(tree, node, name, value) {
   const cmd = {
     label: `Set ${node.id}.${name}`,
+    fileKey: nodeFileKey(tree, node),
     do() {
       if (this.prev === undefined) this.prev = getAttrSafe(node.dom, name);
       setAttrOnDom(node.dom, name, value);
@@ -131,6 +145,7 @@ export function cmdRename(tree, node, newId) {
   collectIdRefs(tree, oldId, affected);
   const cmd = {
     label: `Rename ${oldId} → ${newId}`,
+    fileKey: nodeFileKey(tree, node),
     do() {
       setAttrOnDom(node.dom, 'name', newId);
       node.id = newId;
@@ -181,6 +196,7 @@ export function cmdDeleteNode(tree, node) {
   const parentDom = node.dom.parent;
   const cmd = {
     label: `Delete ${node.id}`,
+    fileKey: nodeFileKey(tree, node),
     do() {
       const idx = parentDom.children.indexOf(node.dom);
       this.removed = removeElement(node.dom);
@@ -204,6 +220,7 @@ export function cmdDuplicateNode(tree, node, newId) {
   let cloneDom = null, cloneNode = null;
   const cmd = {
     label: `Duplicate ${node.id} → ${newId}`,
+    fileKey: nodeFileKey(tree, node),
     do() {
       if (!cloneDom) {
         cloneDom = cloneElementDom(node.dom);
@@ -250,6 +267,7 @@ function cloneElementDom(el) {
 export function cmdSetDomAttr(tree, dom, name, value, label, node) {
   const cmd = {
     label: label || `Set ${name}`,
+    fileKey: fileKeyOf(tree, dom),
     do() {
       if (this.hadAttr === undefined) {
         const a = dom.attrs.find(x => x.name === name);
@@ -275,6 +293,7 @@ export function cmdAddResearchChild(tree, node, kind, attrs = {}) {
   let dom = null;
   const cmd = {
     label: `Add ${kind} to ${node.id}`,
+    fileKey: nodeFileKey(tree, node),
     do() {
       if (!dom) {
         dom = { kind: 'element', name: kind, attrs: [], children: [], selfClosing: true, parent: null, start: -1, line: -1 };
@@ -300,6 +319,7 @@ export function cmdRemoveResearchChild(tree, node, childDom) {
   let removed = null;
   const cmd = {
     label: `Remove ${childDom.name} from ${node.id}`,
+    fileKey: nodeFileKey(tree, node),
     do() {
       removed = removeElement(childDom);
       reparseResearch(node);

@@ -195,24 +195,24 @@ test('commands: setAttr + undo restores byte-identical file', () => {
   const cs = new CommandStack();
   const node = t.byId.get('researchMechanicT1');
   cs.push(cmdSetAttr(t, node, 'unlocked', 'true'));
-  assert(generateFiles(t)['Config/Custom/recipes_research.xml'].includes('unlocked="true"'), 'edited value present');
+  assert(generateFiles(t)['UndeadLegacy/Config/Custom/recipes_research.xml'].includes('unlocked="true"'), 'edited value present');
   cs.undo();
-  eq(generateFiles(t)['Config/Custom/recipes_research.xml'], researchText, 'undo restores original bytes');
+  eq(generateFiles(t)['UndeadLegacy/Config/Custom/recipes_research.xml'], researchText, 'undo restores original bytes');
   cs.redo();
   cs.undo();
-  eq(generateFiles(t)['Config/Custom/recipes_research.xml'], researchText, 'second undo restores bytes');
+  eq(generateFiles(t)['UndeadLegacy/Config/Custom/recipes_research.xml'], researchText, 'second undo restores bytes');
 });
 test('commands: rename cascades to parent references', () => {
   const t = buildTechTree(makeBundle());
   const cs = new CommandStack();
   const node = t.byId.get('researchTier1'); // referenced via parent by researchTier2 etc.
   cs.push(cmdRename(t, node, 'researchTier1Renamed'));
-  const xml = generateFiles(t)['Config/Custom/recipes_research.xml'];
+  const xml = generateFiles(t)['UndeadLegacy/Config/Custom/recipes_research.xml'];
   assert(xml.includes('parent="researchTier1Renamed"'), 'children repointed');
   assert(!xml.includes('parent="researchTier1"'), 'old parent refs gone');
   eq(t.byId.get('researchTier1Renamed'), node);
   cs.undo();
-  eq(generateFiles(t)['Config/Custom/recipes_research.xml'], researchText, 'undo rename restores bytes');
+  eq(generateFiles(t)['UndeadLegacy/Config/Custom/recipes_research.xml'], researchText, 'undo rename restores bytes');
 });
 test('commands: delete node + undo', () => {
   const t = buildTechTree(makeBundle());
@@ -222,7 +222,7 @@ test('commands: delete node + undo', () => {
   assert(!t.byId.has('researchTier2'), 'gone from model');
   assert(!serializeXML(t.sourceFiles[0].dom).includes('<research name="researchTier2"'), 'gone from XML');
   cs.undo();
-  eq(generateFiles(t)['Config/Custom/recipes_research.xml'], researchText, 'undo delete restores bytes');
+  eq(generateFiles(t)['UndeadLegacy/Config/Custom/recipes_research.xml'], researchText, 'undo delete restores bytes');
 });
 test('commands: duplicate node + undo', () => {
   const t = buildTechTree(makeBundle());
@@ -230,11 +230,11 @@ test('commands: duplicate node + undo', () => {
   const node = t.byId.get('researchTier1');
   cs.push(cmdDuplicateNode(t, node, 'researchTier1Copy'));
   assert(t.byId.has('researchTier1Copy'), 'copy exists');
-  const xml = generateFiles(t)['Config/Custom/recipes_research.xml'];
+  const xml = generateFiles(t)['UndeadLegacy/Config/Custom/recipes_research.xml'];
   assert(xml.includes('researchTier1Copy'), 'copy in XML');
   parseXML(xml);
   cs.undo();
-  eq(generateFiles(t)['Config/Custom/recipes_research.xml'], researchText);
+  eq(generateFiles(t)['UndeadLegacy/Config/Custom/recipes_research.xml'], researchText);
 });
 test('commands: add/remove unlock + undo', () => {
   const t = buildTechTree(makeBundle());
@@ -242,11 +242,11 @@ test('commands: add/remove unlock + undo', () => {
   const node = t.byId.get('researchTier1');
   cs.push(cmdAddResearchChild(t, node, 'unlocks', { name: 'ulmResourceBook' }));
   assert(node.research.unlocks.some(u => u.name === 'ulmResourceBook'), 'unlock added');
-  const xml = generateFiles(t)['Config/Custom/recipes_research.xml'];
+  const xml = generateFiles(t)['UndeadLegacy/Config/Custom/recipes_research.xml'];
   parseXML(xml);
   assert(xml.includes('<unlocks name="ulmResourceBook"/>'), 'unlock in XML');
   cs.undo();
-  eq(generateFiles(t)['Config/Custom/recipes_research.xml'], researchText, 'add undo restores bytes');
+  eq(generateFiles(t)['UndeadLegacy/Config/Custom/recipes_research.xml'], researchText, 'add undo restores bytes');
 });
 test('commands: remove existing unlock + undo', () => {
   const t = buildTechTree(makeBundle());
@@ -256,7 +256,7 @@ test('commands: remove existing unlock + undo', () => {
   cs.push(cmdRemoveResearchChild(t, node, u.dom));
   assert(!node.research.unlocks.length, 'unlock removed');
   cs.undo();
-  eq(generateFiles(t)['Config/Custom/recipes_research.xml'], researchText, 'remove undo restores bytes');
+  eq(generateFiles(t)['UndeadLegacy/Config/Custom/recipes_research.xml'], researchText, 'remove undo restores bytes');
 });
 test('generator: pristine tree is not dirty', () => {
   const t = buildTechTree(makeBundle());

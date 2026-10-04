@@ -223,7 +223,11 @@ export function createInspector(container, ctx) {
       su.appendChild(row);
       const inp = row.querySelector('.pre-target');
       attachZhSuggest(inp, tree);
-      inp.addEventListener('change', () => { ctx.cmd(() => cmdSetDomAttr(tree, u.dom, 'name', inp.value, 'Set unlocks.name', n)); ctx.onDirty(); });
+      inp.addEventListener('change', () => {
+        if (inp.value === u.name) return; // no-op guard: kills blur/duplicate change noise
+        ctx.cmd(() => cmdSetDomAttr(tree, u.dom, 'name', inp.value, 'Set unlocks.name', n));
+        ctx.onDirty();
+      });
       row.querySelector('button').addEventListener('click', () => { ctx.cmd(() => cmdRemoveResearchChild(tree, n, u.dom)); ctx.onDirty(); });
     }
     attachDatalist(c, 'dl-nodes', tree.nodes.map(x => x.id));
@@ -248,7 +252,11 @@ export function createInspector(container, ctx) {
       const nameInp = row.querySelector('.pre-target');
       attachZhSuggest(nameInp, tree);
       const cntInp = row.querySelector('.pre-val');
-      nameInp.addEventListener('change', () => { ctx.cmd(() => cmdSetDomAttr(tree, ing.dom, 'name', nameInp.value, 'Set ingredient.name', n)); ctx.onDirty(); });
+      nameInp.addEventListener('change', () => {
+        if (nameInp.value === ing.name) return; // no-op guard
+        ctx.cmd(() => cmdSetDomAttr(tree, ing.dom, 'name', nameInp.value, 'Set ingredient.name', n));
+        ctx.onDirty();
+      });
       cntInp.addEventListener('change', () => { ctx.cmd(() => cmdSetDomAttr(tree, ing.dom, 'count', cntInp.value || undefined)); ctx.onDirty(); });
       row.querySelector('button').addEventListener('click', () => { ctx.cmd(() => cmdRemoveResearchChild(tree, n, ing.dom)); ctx.onDirty(); });
     }

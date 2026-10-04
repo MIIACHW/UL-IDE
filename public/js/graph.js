@@ -1,8 +1,10 @@
-// Technology Graph Canvas — SVG based, zero dependencies. Research tree only,
-// mirroring the in-game ULM_ResearchWindow: layered tidy tree, roots on a bottom
-// rail, children above, ordered by the pos="x,y" hint, item icons + localized names.
-// Interactions: pan, zoom, node drag, box select, edge selection, culling.
-
+// Technology Graph Canvas — incremental SVG renderer (research tree only).
+//
+// Architecture: a full DOM rebuild (renderNodes/renderEdges) happens ONLY on first
+// load, filter changes, or model structure changes. Selection, problem markers and
+// node positions update incrementally against a per-node DOM cache — clicking a
+// node never recreates the tree, never re-requests icons, never serializes XML.
+// Data isolation: only tree.nodes with kind === 'research' enter this graph.
 const NS = 'http://www.w3.org/2000/svg';
 const NODE_R = 26;            // half-size of the icon box
 const CELL_X = 62, CELL_Y = 96;
@@ -19,9 +21,13 @@ function el(name, attrs = {}, parent) {
 export function createGraph(container, tree, hooks) {
   const svg = el('svg', { class: 'graph-svg' });
   container.appendChild(svg);
-  const gEdges = el('g', { class: 'edges' }, svg);
-  const gNodes = el('g', { class: 'nodes' }, svg);
-  const gRubber = el('g', {}, svg);
+  // renderStructure(): viewport + layer groups are created exactly once
+  const viewport = el('g', { class: 'viewport' }, svg);
+  const gEdges = el('g', { class: 'edges' }, viewport);
+  const gNodes = el('g', { class: 'nodes' }, viewport);
+  const gRubber = el('g', {}, viewport);
+
+  const stats = { fullRenders: 0, selectionUpdates: 0, nodeCreates: 0, edgeCreates: 0, iconRequests: 0, applyTransformCalls: 0 };
 
   const state = {
     scale: 0.55, panX: 120, panY: 60,
@@ -34,19 +40,23 @@ export function createGraph(container, tree, hooks) {
     nodePos: new Map(),
   };
 
+  const nodeEls = new Map();  // nodeId -> {g, rect, img, label, marker, root, R}
+  const edgeEls = new Map();  // edgeId -> {el, edge}
+  let oldProblemNodes = new Map();
+  let researchNodes = [];     // isolated research data — other kinds never enter
+
   function applyTransform() {
-    svg.querySelector('.viewport')?.setAttribute('transform', `translate(${state.panX},${state.panY}) scale(${state.scale})`);
+    stats.applyTransformCalls++;
+    viewport.setAttribute('transform', `translate(${state.panX},${state.panY}) scale(${state.scale})`);
   }
 
-  // ---------------------------------------------------------- layout
-  // Layered tidy tree: depth = longest path from a root; x by leaf packing with
-  // siblings sorted by the pos="x,y" hint (the game's DLL does the same).
+  // ---------------------------------------------------------- layout (research only)
   function layoutResearch() {
+    researchNodes = tree.nodes.filter(n => n.kind === 'research'); // data isolation
     state.nodePos.clear();
-    const researchNodes = tree.nodes; // any kind — forests side by side on the root rail
     const children = new Map();
     for (const n of researchNodes) {
-      const p = n.parentId && tree.byId.get(n.parentId) ? n.parentId : null;
+      const p = n.parentId && tree.byId.get(n.parentId)?.kind === 'research' ? n.parentId : null;
       if (p) { if (!children.has(p)) children.set(p, []); children.get(p).push(n); }
     }
     const depthCache = new Map();
@@ -73,7 +83,7 @@ export function createGraph(container, tree, hooks) {
       state.nodePos.set(n.id, { x, y: -depthOf(n) * CELL_Y, root: !n.parentId });
       return x;
     };
-    const roots = researchNodes.filter(n => !n.parentId || !tree.byId.get(n.parentId))
+    const roots = researchNodes.filter(n => !n.parentId || tree.byId.get(n.parentId)?.kind !== 'research')
       .sort((a, b) => (a.research?.posX ?? 0) - (b.research?.posX ?? 0) || a.sourceLine - b.sourceLine);
     for (const r of roots) { if (leafX > 0) leafX += 1; place(r); }
     // user-dragged IDE positions win (view state only — the game auto-lays-out too)
@@ -84,6 +94,7 @@ export function createGraph(container, tree, hooks) {
 
   // ---------------------------------------------------------- filtering
   function matchesFilter(n) {
+    if (n.kind !== 'research') return false; // research graph isolation
     const f = hooks.filter;
     if (f) {
       if (f.mods && f.mods.size && !f.mods.has(n.sourceMod)) return false;
@@ -101,68 +112,10 @@ export function createGraph(container, tree, hooks) {
 
   function computeVisible() {
     state.visible.clear();
-    for (const n of tree.nodes) if (matchesFilter(n)) state.visible.add(n.id);
+    for (const n of researchNodes) if (matchesFilter(n)) state.visible.add(n.id);
   }
 
-  // ---------------------------------------------------------- render
-  function render() {
-    layoutResearch();
-    computeVisible();
-    gEdges.textContent = '';
-    gNodes.textContent = '';
-    let vp = null;
-    for (const c of svg.children) if (c.classList?.contains('viewport')) { vp = c; break; }
-    if (!vp) vp = el('g', { class: 'viewport' }, svg);
-    if (gEdges.parentNode !== vp) vp.appendChild(gEdges);
-    if (gNodes.parentNode !== vp) vp.appendChild(gNodes);
-    if (gRubber.parentNode !== vp) vp.appendChild(gRubber);
-
-    // edges — game-style orthogonal connectors
-    for (const e of tree.edges) {
-      if (state.hiddenEdges.has(e.type)) continue;
-      const a = state.nodePos.get(e.from), b = state.nodePos.get(e.to);
-      if (!a || !b || !state.visible.has(e.from) || !state.visible.has(e.to)) continue;
-      const sel = state.selectedEdge === e.id;
-      const color = EDGE_COLORS[e.type] || '#888';
-      const yTop = a.y - NODE_R;
-      const yBot = b.y + NODE_R;
-      const railY = yBot + (yTop - yBot) / 2;
-      const pts = [[a.x, yTop], [a.x, railY], [b.x, railY], [b.x, yBot]];
-      const path = el('path', {
-        d: 'M' + pts.map(p => p.join(',')).join(' L'),
-        fill: 'none', stroke: color, 'stroke-width': sel ? 2.4 : 1.1,
-        opacity: sel ? 1 : 0.6, class: 'edge' + (sel ? ' selected' : ''),
-      }, gEdges);
-      path.dataset.edgeId = e.id;
-      path.addEventListener('mousedown', (ev) => {
-        ev.stopPropagation();
-        state.selectedEdge = e.id; state.selected.clear();
-        hooks.onSelectionChange({ nodes: [], edge: e });
-        render();
-      });
-    }
-    // bottom rail through the roots
-    const railNodes = tree.nodes.filter(n => n.kind === 'research' && state.visible.has(n.id) && !n.parentId)
-      .map(n => state.nodePos.get(n.id)).filter(Boolean).sort((p, q) => p.x - q.x);
-    if (railNodes.length > 1) {
-      el('line', {
-        x1: railNodes[0].x, y1: railNodes[0].y + NODE_R,
-        x2: railNodes[railNodes.length - 1].x, y2: railNodes[railNodes.length - 1].y + NODE_R,
-        stroke: '#5a6572', 'stroke-width': 1.2, opacity: 0.8, class: 'edge',
-      }, gEdges);
-    }
-
-    // nodes (culled)
-    for (const n of tree.nodes) {
-      if (!state.visible.has(n.id)) continue;
-      const p = state.nodePos.get(n.id);
-      if (!p) continue;
-      renderResearchNode(n, p);
-    }
-    applyTransform();
-  }
-
-  // game-style research node: dark box + item icon (fallback chain) + localized name
+  // ---------------------------------------------------------- node DOM (cached)
   const PLACEHOLDER_ICON = '/api/icon?name=missingIcon';
   const S = (inner) => 'data:image/svg+xml;utf8,' + encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36">' +
@@ -196,43 +149,38 @@ export function createGraph(container, tree, hooks) {
   };
   const symbolSvg = (name) => SYMBOL_SVGS[name] || SYMBOL_SVGS[String(name).split('_')[0]] || SYMBOL_SVGS.research;
 
-  function renderResearchNode(n, p) {
-    const R = p.root ? 30 : NODE_R;
-    const g = el('g', { class: 'node', transform: `translate(${p.x},${p.y})` }, gNodes);
-    g.dataset.nodeId = n.id;
-    const isSel = state.selected.has(n.id);
-    el('rect', {
-      x: -R, y: -R, width: R * 2, height: R * 2, rx: 8,
-      fill: '#23272e', stroke: isSel ? '#ffd166' : (p.root ? '#8a97a5' : '#4c5763'),
-      'stroke-width': isSel ? 2.4 : 1.3,
-    }, g);
-    const img = el('image', { x: -R + 7, y: -R + 7, width: R * 2 - 14, height: R * 2 - 14, href: PLACEHOLDER_ICON }, g);
-    // icon chain mirroring the game: research named after an item -> explicit symbol icon
-    // (fuzzy-matched to a thematically related item icon) -> first unlock item -> the
-    // game's own missingIcon texture. ui_game_symbol_* glyphs are drawn as SVG.
+  function iconCandidates(n) {
     const candidates = [];
     if (n.id) candidates.push({ name: n.id });
-    // first explicit unlock — the server resolves it through the game's own
-    // Extends/Icon inheritance, so Powered variants get their real item icon
     if (n.research?.unlocks?.[0]?.name) candidates.push({ name: n.research.unlocks[0].name });
-    // symbol_* fuzzily maps to a thematically related item icon (symbol_baton -> *baton*.png)
     if (n.icon && /^symbol_/i.test(n.icon) && !/^ui_game_symbol_/i.test(n.icon)) {
       const base = n.icon.replace(/^symbol_/i, '');
       candidates.push({ name: n.icon, fuzzy: base });
       if (base.includes('_')) candidates.push({ name: n.icon, fuzzy: base.split('_').pop() });
+      candidates.push({ svg: symbolSvg(base) });
     }
-    // ui_game_symbol_* / unmatched symbol_*: the game's flat glyph, drawn as SVG
     if (n.icon && /^ui_game_symbol_/i.test(n.icon)) {
       candidates.push({ svg: symbolSvg(n.icon.replace(/^ui_game_symbol_/i, '')) });
-    }
-    if (n.icon && /^symbol_/i.test(n.icon) && !/^ui_game_symbol_/i.test(n.icon)) {
-      const base = n.icon.replace(/^symbol_/i, '');
-      candidates.push({ svg: symbolSvg(base) });
     }
     if (!n.icon && n.id) {
       const m = /[A-Za-z]+/.exec(n.id.split(/(?=[A-Z])/).pop());
       if (m && m[0].length >= 4) candidates.push({ name: n.id, fuzzy: m[0].toLowerCase() });
     }
+    return candidates;
+  }
+
+  function createNodeEl(n) {
+    stats.nodeCreates++;
+    const p = state.nodePos.get(n.id) || { x: 0, y: 0 };
+    const R = p.root ? 30 : 26;
+    const g = el('g', { class: 'node', transform: `translate(${p.x},${p.y})`, 'data-node-id': n.id }, gNodes);
+    const rect = el('rect', {
+      x: -R, y: -R, width: R * 2, height: R * 2, rx: 8,
+      fill: '#23272e', stroke: p.root ? '#8a97a5' : '#4c5763', 'stroke-width': 1.3,
+    }, g);
+    const img = el('image', { x: -R + 7, y: -R + 7, width: R * 2 - 14, height: R * 2 - 14, href: PLACEHOLDER_ICON }, g);
+    // icon fallback chain; the browser caches each URL, the DOM cache prevents re-request
+    const candidates = iconCandidates(n);
     let ci = 0;
     const tryNext = () => {
       if (ci >= candidates.length) { img.setAttribute('href', PLACEHOLDER_ICON); return; }
@@ -244,18 +192,213 @@ export function createGraph(container, tree, hooks) {
     };
     img.addEventListener('error', tryNext);
     tryNext();
-    // localized name under the box (Simplified Chinese preferred)
-    const label = (n.display || n.id);
-    el('text', { x: 0, y: R + 13, 'text-anchor': 'middle', fill: isSel ? '#ffd166' : '#aeb6c2', 'font-size': 10.5 }, g)
-      .textContent = label.length > 13 ? label.slice(0, 12) + '…' : label;
+    stats.iconRequests++;
+    const label = el('text', { x: 0, y: R + 13, 'text-anchor': 'middle', fill: '#aeb6c2', 'font-size': 10.5 }, g);
+    const display = n.display || n.id;
+    label.textContent = display.length > 13 ? display.slice(0, 12) + '…' : display;
     const title = el('title', {}, g);
-    title.textContent = `${n.display || n.id}  [${n.id}]`;
-    if (state.problemNodes.has(n.id)) {
-      const sev = state.problemNodes.get(n.id);
-      el('circle', { cx: R - 6, cy: -R + 6, r: 4.5, fill: sev === 'error' ? '#e5484d' : sev === 'warning' ? '#f5a623' : '#7c8691' }, g);
-    }
-    g.addEventListener('mousedown', (ev) => startNodeDrag(n, ev, g));
+    title.textContent = `${display}  [${n.id}]`;
+    g.addEventListener('mousedown', (ev) => startNodeDrag(n, ev));
     g.addEventListener('dblclick', (ev) => { ev.stopPropagation(); hooks.onInspect(n); });
+    const entry = { g, rect, img, label, marker: null, root: !!p.root, R };
+    nodeEls.set(n.id, entry);
+    return entry;
+  }
+
+  function applyNodeVisual(n) {
+    const e = nodeEls.get(n.id);
+    if (!e) return;
+    const isSel = state.selected.has(n.id);
+    e.rect.setAttribute('stroke', isSel ? '#ffd166' : (e.root ? '#8a97a5' : '#4c5763'));
+    e.rect.setAttribute('stroke-width', isSel ? 2.4 : 1.3);
+    e.label.setAttribute('fill', isSel ? '#ffd166' : '#aeb6c2');
+  }
+
+  function applyNodePos(n) {
+    const e = nodeEls.get(n.id);
+    const p = state.nodePos.get(n.id);
+    if (!e || !p) return;
+    e.g.setAttribute('transform', `translate(${p.x},${p.y})`);
+  }
+
+  function updateMarker(n, sev) {
+    const e = nodeEls.get(n.id);
+    if (!e) return;
+    if (sev == null) {
+      if (e.marker) { e.marker.remove(); e.marker = null; }
+      return;
+    }
+    const fill = sev === 'error' ? '#e5484d' : sev === 'warning' ? '#f5a623' : '#7c8691';
+    if (e.marker) { e.marker.setAttribute('fill', fill); return; }
+    e.marker = el('circle', { cx: e.R - 6, cy: -e.R + 6, r: 4.5, fill }, e.g);
+  }
+
+  // ---------------------------------------------------------- edges (cached)
+  function edgePathD(a, b) {
+    const yTop = a.y - NODE_R;
+    const yBot = b.y + NODE_R;
+    const railY = yBot + (yTop - yBot) / 2;
+    return 'M' + [[a.x, yTop], [a.x, railY], [b.x, railY], [b.x, yBot]].map(p => p.join(',')).join(' L');
+  }
+
+  function createEdgeEl(e) {
+    stats.edgeCreates++;
+    const a = state.nodePos.get(e.from), b = state.nodePos.get(e.to);
+    const sel = state.selectedEdge === e.id;
+    const path = el('path', {
+      d: a && b ? edgePathD(a, b) : 'M0,0',
+      fill: 'none', stroke: EDGE_COLORS[e.type] || '#888', 'stroke-width': sel ? 2.4 : 1.1,
+      opacity: sel ? 1 : 0.6, class: 'edge' + (sel ? ' selected' : ''),
+    }, gEdges);
+    path.dataset.edgeId = e.id;
+    path.addEventListener('mousedown', (ev) => {
+      ev.stopPropagation();
+      state.selectedEdge = e.id; state.selected.clear();
+      updateEdgeSelection();
+      hooks.onSelectionChange({ nodes: [], edge: e });
+    });
+    edgeEls.set(e.id, { el: path, edge: e });
+  }
+
+  // ---------------------------------------------------------- incremental ops
+  // Edge highlight: only touches edge visuals whose selection state changed.
+  function updateEdgeSelection() {
+    for (const [id, e] of edgeEls) {
+      const sel = state.selectedEdge === id;
+      e.el.setAttribute('stroke-width', sel ? 2.4 : 1.1);
+      e.el.setAttribute('opacity', sel ? 1 : 0.6);
+      e.el.setAttribute('class', 'edge' + (sel ? ' selected' : ''));
+    }
+  }
+
+  // Selection: only touches the visuals of nodes/edges whose state changed.
+  function updateSelection(prevSelected) {
+    stats.selectionUpdates++;
+    for (const id of prevSelected || []) {
+      const n = tree.byId.get(id);
+      if (n) applyNodeVisual(n);
+    }
+    for (const id of state.selected) {
+      const n = tree.byId.get(id);
+      if (n) applyNodeVisual(n);
+    }
+    updateEdgeSelection();
+  }
+
+  // Problem markers: diff old vs new maps, touch only changed nodes.
+  function updateProblemStyles(newMap) {
+    const ids = new Set([...oldProblemNodes.keys(), ...newMap.keys()]);
+    for (const id of ids) {
+      const sev = newMap.get(id);
+      const oldSev = oldProblemNodes.get(id);
+      if (sev === oldSev) continue;
+      updateMarker(tree.byId.get(id), sev ?? null);
+    }
+    oldProblemNodes = new Map(newMap);
+  }
+
+  // Single node position: transform + the edges connected to it.
+  function updateNodePosition(nodeId) {
+    const e = nodeEls.get(nodeId);
+    const p = state.nodePos.get(nodeId);
+    if (e && p) e.g.setAttribute('transform', `translate(${p.x},${p.y})`);
+    for (const [id, ee] of edgeEls) {
+      if (ee.edge.from !== nodeId && ee.edge.to !== nodeId) continue;
+      const a = state.nodePos.get(ee.edge.from), b = state.nodePos.get(ee.edge.to);
+      if (a && b) ee.el.setAttribute('d', edgePathD(a, b));
+    }
+  }
+
+  // Visibility: toggle display only (no DOM recreation).
+  function updateVisibility() {
+    for (const n of researchNodes) {
+      const e = nodeEls.get(n.id);
+      if (!e) continue;
+      if (state.visible.has(n.id)) e.g.removeAttribute('display');
+      else e.g.setAttribute('display', 'none');
+    }
+  }
+
+  // ---------------------------------------------------------- structural renders
+  // renderNodes(): reconcile node DOM against the model (create missing, drop gone,
+  // reposition, visibility, visuals). Never called for selection-only changes.
+  function renderNodes() {
+    for (const [id, e] of nodeEls) {
+      const still = tree.byId.get(id);
+      if (!still || still.kind !== 'research') { e.g.remove(); nodeEls.delete(id); }
+    }
+    for (const n of researchNodes) {
+      if (!nodeEls.has(n.id)) createNodeEl(n);
+    }
+    for (const n of researchNodes) {
+      applyNodePos(n);
+      applyNodeVisual(n);
+    }
+    updateVisibility();
+  }
+
+  // renderEdges(): rebuild all edge DOM (called on structure changes only).
+  function renderEdges() {
+    gEdges.textContent = '';
+    edgeEls.clear();
+    for (const e of tree.edges) {
+      if (state.hiddenEdges.has(e.type)) continue;
+      const a = state.nodePos.get(e.from), b = state.nodePos.get(e.to);
+      if (!a || !b || !state.visible.has(e.from) || !state.visible.has(e.to)) continue;
+      createEdgeEl(e);
+    }
+    // bottom rail through the roots
+    const railNodes = researchNodes.filter(n => state.visible.has(n.id) && !n.parentId)
+      .map(n => state.nodePos.get(n.id)).filter(Boolean).sort((p, q) => p.x - q.x);
+    if (railNodes.length > 1) {
+      el('line', {
+        x1: railNodes[0].x, y1: railNodes[0].y + NODE_R,
+        x2: railNodes[railNodes.length - 1].x, y2: railNodes[railNodes.length - 1].y + NODE_R,
+        stroke: '#5a6572', 'stroke-width': 1.2, opacity: 0.8, class: 'edge',
+      }, gEdges);
+    }
+  }
+
+  // After model edits (commands): layout + DOM reconcile + edge sync — no full clear.
+  function syncModel() {
+    layoutResearch();
+    renderNodes();
+    syncEdges();
+    updateEdgeSelection();
+    applyTransform();
+  }
+
+  function syncEdges() {
+    const wanted = new Map();
+    for (const e of tree.edges) {
+      if (state.hiddenEdges.has(e.type)) continue;
+      const a = state.nodePos.get(e.from), b = state.nodePos.get(e.to);
+      if (!a || !b || !state.visible.has(e.from) || !state.visible.has(e.to)) continue;
+      wanted.set(e.id, e);
+    }
+    for (const [id, e] of edgeEls) {
+      if (!wanted.has(id)) { e.el.remove(); edgeEls.delete(id); }
+    }
+    for (const [id, e] of wanted) {
+      if (!edgeEls.has(id)) createEdgeEl(e);
+    }
+    for (const [id, ee] of edgeEls) {
+      const a = state.nodePos.get(ee.edge.from), b = state.nodePos.get(ee.edge.to);
+      if (a && b) ee.el.setAttribute('d', edgePathD(a, b));
+    }
+  }
+
+  // Full render: first load, filter/search changes, or explicit structural reload.
+  function fullRender() {
+    stats.fullRenders++;
+    layoutResearch();
+    computeVisible();
+    renderNodes();
+    renderEdges();
+    for (const id of state.selected) applyNodeVisual(tree.byId.get(id));
+    for (const [id, sev] of state.problemNodes) updateMarker(tree.byId.get(id), sev);
+    updateEdgeSelection();
+    applyTransform();
   }
 
   // ---------------------------------------------------------- interactions
@@ -293,15 +436,16 @@ export function createGraph(container, tree, hooks) {
           rect.remove();
           const x1 = Math.min(start.x, cur.x), x2 = Math.max(start.x, cur.x);
           const y1 = Math.min(start.y, cur.y), y2 = Math.max(start.y, cur.y);
+          const prev = new Set(state.selected);
           state.selected.clear();
-          for (const n of tree.nodes) {
+          for (const n of researchNodes) {
             if (!state.visible.has(n.id)) continue;
             const p = state.nodePos.get(n.id);
             if (p && p.x >= x1 && p.x <= x2 && p.y >= y1 && p.y <= y2) state.selected.add(n.id);
           }
           state.selectedEdge = null;
+          updateSelection(prev);
           hooks.onSelectionChange({ nodes: [...state.selected].map(id => tree.byId.get(id)), edge: null });
-          render();
         },
       };
     } else {
@@ -316,40 +460,46 @@ export function createGraph(container, tree, hooks) {
   function startNodeDrag(n, ev) {
     ev.stopPropagation();
     if (ev.button !== 0) return;
+    let prev = null;
     if (!state.selected.has(n.id)) {
+      prev = new Set(state.selected);
       if (!ev.ctrlKey) state.selected.clear();
       state.selected.add(n.id);
       state.selectedEdge = null;
+      updateSelection(prev);
       hooks.onSelectionChange({ nodes: [...state.selected].map(id => tree.byId.get(id)), edge: null });
-      render();
     }
     const start = toWorld(ev.clientX, ev.clientY);
     const origins = new Map();
     for (const id of state.selected) { const p = state.nodePos.get(id); if (p) origins.set(id, { ...p }); }
+    // only edges connected to a dragged node need d updates during the move
+    const affectedEdges = [];
+    for (const [id, ee] of edgeEls) {
+      if (origins.has(ee.edge.from) || origins.has(ee.edge.to)) affectedEdges.push(ee);
+    }
     let moved = false;
     state.dragging = {
       type: 'node',
       move(ev2) {
         const cur = toWorld(ev2.clientX, ev2.clientY);
         const dx = cur.x - start.x, dy = cur.y - start.y;
-        if (Math.abs(dx) + Math.abs(dy) > 2) moved = true;
+        if (!moved && Math.abs(dx) + Math.abs(dy) > 2) moved = true;
         for (const [id, o] of origins) {
           const np = { x: o.x + dx, y: o.y + dy };
           state.nodePos.set(id, np);
-          const g = gNodes.querySelector(`g[data-node-id="${CSS.escape(id)}"]`);
-          if (g) g.setAttribute('transform', `translate(${np.x},${np.y})`);
+          updateNodePosition(id);
         }
       },
       up() {
         if (!moved) return;
-        hooks.onDirty();
+        // write view state first, then notify (dirty) — never a full render here
         for (const id of state.selected) {
           const node = tree.byId.get(id);
           const p = state.nodePos.get(id);
           if (!node || !p) continue;
-          if (node.kind === 'research') node.pos = { x: p.x, y: p.y }; // IDE-only view state
+          if (node.kind === 'research') node.pos = { x: p.x, y: p.y };
         }
-        render();
+        hooks.onDirty();
       },
     };
   }
@@ -360,19 +510,25 @@ export function createGraph(container, tree, hooks) {
   // ---------------------------------------------------------- public api
   return {
     state,
-    render,
-    setSearch(q) { state.search = q; },
-    setHiddenEdges(set) { state.hiddenEdges = set; },
-    setProblemNodes(map) { state.problemNodes = map; },
+    stats,
+    get viewportEl() { return viewport; },
+    // full render — first load / filter changes only
+    render() { fullRender(); },
+    setSearch(q) { state.search = q; fullRender(); },
+    setHiddenEdges(set) { state.hiddenEdges = set; renderEdges(); updateEdgeSelection(); },
+    setProblemNodes(map) { updateProblemStyles(map); },
+    // selection decoupled from rendering: visual toggle + optional pan, no rebuild
     selectNode(id, { focus = true } = {}) {
+      const prev = new Set(state.selected);
       state.selected.clear(); state.selected.add(id); state.selectedEdge = null;
+      updateSelection(prev);
       const n = tree.byId.get(id);
       hooks.onSelectionChange({ nodes: n ? [n] : [], edge: null });
       if (focus) this.centerOn(id);
-      render();
     },
+    // pan only — never re-renders
     centerOn(id) {
-      this.render();
+      if (!researchNodes.length) fullRender();
       const p = state.nodePos.get(id);
       if (!p) return;
       const r = svg.getBoundingClientRect();
@@ -381,14 +537,14 @@ export function createGraph(container, tree, hooks) {
       applyTransform();
     },
     fitView({ minScale = 0 } = {}) {
-      this.render();
+      if (!researchNodes.length) fullRender();
       let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
       for (const id of state.visible) {
         const p = state.nodePos.get(id);
         if (!p) continue;
         x1 = Math.min(x1, p.x); y1 = Math.min(y1, p.y); x2 = Math.max(x2, p.x); y2 = Math.max(y2, p.y);
       }
-      if (x1 === Infinity) return;
+      if (x1 === Infinity || !Number.isFinite(x1) || !Number.isFinite(y1)) return;
       const r = svg.getBoundingClientRect();
       const pad = 60;
       const sx = (r.width - pad * 2) / Math.max(1, x2 - x1), sy = (r.height - pad * 2) / Math.max(1, y2 - y1);
@@ -407,5 +563,7 @@ export function createGraph(container, tree, hooks) {
       state.panY = r.height / 2 - (y1 + y2) / 2 * state.scale;
       applyTransform();
     },
+    // called after model edits — incremental sync, no XML serialization, no full clear
+    syncModel,
   };
 }

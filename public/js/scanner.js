@@ -3,14 +3,18 @@
 // per-mod localization (English/SChinese), the name index and the user dictionary.
 import { apiVanilla } from './api.js';
 
-// Client-side classifier for dropped XML files (same rules as the server).
-export function classifyXml(text) {
-  if (/<research\s/.test(text)) return 'research';
-  if (/<(perk|skill|book_group|attribute)\s+[^>]*name="/.test(text)) return 'progression';
+// Client-side classifier for dropped XML files (same tightened rules as the server).
+export function classifyXml(text, filename = '') {
+  const lower = String(filename).toLowerCase();
+  if (/<research[\s>]/.test(text)) {
+    const patched = /<(set|append)\s+[^>]*xpath\s*=/i.test(text) || /<configs?\s*>/i.test(text) || /<Subquake\s*>/i.test(text);
+    if (lower.includes('research') || patched) return 'research';
+  }
+  if (/<(attributes|skills|perks)[\s>]/.test(text) && /<(perk|skill|book_group|attribute)\s+[^>]*name="/.test(text)) return 'progression';
   return null;
 }
 
-export async function scanWorkspace(scanResult, log = () => {}) {
+export async function scanWorkspace(scanResult, log = () => {}, { includeProgression = false } = {}) {
   const bundle = {
     modsDir: scanResult.modsDir,
     mods: scanResult.mods || [],
@@ -24,8 +28,9 @@ export async function scanWorkspace(scanResult, log = () => {}) {
     warnings: [],
   };
 
-  // 1. tech tree files (classified server-side, content delivered)
+  // 1. tech tree files — research always; progression only as explicit opt-in
   for (const sf of scanResult.sourceFiles || []) {
+    if (sf.role === 'progression' && !includeProgression) continue;
     bundle.sourceFiles.push(sf);
     log(`科技树来源: [${sf.mod}] ${sf.path} (${sf.size} bytes) [${sf.role}]`);
   }

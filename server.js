@@ -75,15 +75,27 @@ function listXmlFiles(rootDir, base) {
   return out;
 }
 
-function classifyXml(text) {
-  if (/<research\s/.test(text)) return 'research';
-  if (/<(perk|skill|book_group|attribute)\s+[^>]*name="/.test(text)) return 'progression';
+// Tightened classification: research files must either carry "research" in their
+// name or hold <research> inside a UL-style patch container (set/append/configs);
+// progression files must have the real <attributes>/<skills>/<perks> sections.
+// A stray matching tag somewhere in an unrelated XML no longer pulls the file in.
+function classifyXml(text, filename = '') {
+  const lower = String(filename).toLowerCase();
+  if (/<research[\s>]/.test(text)) {
+    const patched = /<(set|append)\s+[^>]*xpath\s*=/i.test(text) || /<configs?\s*>/i.test(text) || /<Subquake\s*>/i.test(text);
+    if (lower.includes('research') || patched) return 'research';
+  }
+  if (/<(attributes|skills|perks)[\s>]/.test(text) && /<(perk|skill|book_group|attribute)\s+[^>]*name="/.test(text)) return 'progression';
   return null;
 }
 
 // ---------------------------------------------------------------- scan
 // iconChain is module scope: /api/icon resolves names through it after a scan.
 const iconChain = {}; // name -> { icon?: string, extends?: string }
+// icon index + fuzzy cache (built once per scan; /api/icon is pure lookup + sendFile)
+const iconIndex = {};      // iconName -> absolute png path
+const fuzzyIndex = new Map(); // fuzzyToken -> absolute png path | null
+let fuzzyDirs = [];        // dirs to search for fuzzy matches (set per scan)
 
 function scanMods(modsDir) {
   const mods = [];
@@ -130,7 +142,7 @@ function scanMods(modsDir) {
       if (f.size > 12 * 1024 * 1024) continue;
       let buf; try { buf = fs.readFileSync(path.join(mod.modRoot, f.path)); } catch { continue; }
       const { bom, text } = detectBom(buf);
-      const role = classifyXml(text);
+      const role = classifyXml(text, f.path);
       if (role) sourceFiles.push({ mod: mod.name, modRoot: mod.modRoot, path: f.path, role, size: f.size, sha1: sha1(buf), bom, text });
       // name index sources (never returned to the client, used for implicit-unlock + icons)
       const lower = f.path.toLowerCase();
@@ -163,6 +175,27 @@ function scanMods(modsDir) {
       if (e.isFile() && /^blocks_.*\.xml$|^items_.*\.xml$/i.test(e.name)) scanChainsFile(path.join(custom, e.name));
     }
   }
+
+  // icon index: vanilla ItemIcons as base, then every mod's atlases in load order
+  // (later mods win). Built ONCE per scan — /api/icon never re-walks directories.
+  for (const k of Object.keys(iconIndex)) delete iconIndex[k];
+  fuzzyIndex.clear();
+  const addAtlas = (dir) => {
+    let entries3; try { entries3 = fs.readdirSync(dir); } catch { return; }
+    for (const f of entries3) {
+      if (f.toLowerCase().endsWith('.png')) iconIndex[f.slice(0, -4)] = path.join(dir, f);
+    }
+  };
+  addAtlas(path.join(VANILLA_ROOT, 'ItemIcons'));
+  fuzzyDirs = [];
+  for (const mod of mods) {
+    for (const atlas of ['ItemIconAtlas', 'UISkills']) {
+      const dir = path.join(mod.modRoot, 'UIAtlases', atlas);
+      addAtlas(dir);
+      fuzzyDirs.push(dir);
+    }
+  }
+  fuzzyDirs.push(path.join(VANILLA_ROOT, 'ItemIcons'));
 
   // user-editable custom dictionary (Key,schinese CSV) — merged last, wins over everything
   let customDictionary = null;
@@ -284,53 +317,38 @@ async function handleApi(req, res, url) {
     } catch (e) { return sendErr(res, 400, e.message); }
   }
   if (route === '/api/icon' && req.method === 'GET') {
+    // pure lookup + sendFile: the index (and fuzzy cache) is built once per scan
     const name = (url.searchParams.get('name') || '').trim();
     const fuzzy = (url.searchParams.get('fuzzy') || '').trim().toLowerCase();
     const safe = name.replace(/[^a-zA-Z0-9_.]/g, '');
     if (!safe) return sendErr(res, 400, 'name required');
-    // atlas roots: every mod in load order (later wins), vanilla as base fallback
-    const modDirs = [];
-    try {
-      for (const e of fs.readdirSync(MODS_DIR, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-        if (e.isDirectory() && fs.existsSync(path.join(MODS_DIR, e.name, 'ModInfo.xml'))) modDirs.push(path.join(MODS_DIR, e.name));
-      }
-    } catch { /* ignore */ }
-    const modAtlas = [];
-    for (const md of modDirs) {
-      for (const atlas of ['ItemIconAtlas', 'UISkills']) modAtlas.push(path.join(md, 'UIAtlases', atlas));
-    }
-    const fileFor = (n) => {
-      let hit = null;
-      for (const dir of modAtlas) { const p = path.join(dir, n + '.png'); if (fs.existsSync(p)) hit = p; } // last mod wins
-      if (hit) return hit;
-      const p = path.join(VANILLA_ROOT, 'ItemIcons', n + '.png');
-      return fs.existsSync(p) ? p : null;
+    const sendPng = (file) => {
+      const data = fs.readFileSync(file);
+      res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=604800' });
+      res.end(data);
     };
     let cur = safe;
     const seen = new Set();
     for (let hop = 0; hop < 12 && cur && !seen.has(cur); hop++) {
       seen.add(cur);
-      const file = fileFor(cur);
-      if (file) {
-        const data = fs.readFileSync(file);
-        res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' });
-        return res.end(data);
-      }
+      const file = iconIndex[cur];
+      if (file) return sendPng(file);
       const link = iconChain[cur];
       if (!link) break;
       cur = link.icon && !/^ui_game_symbol_/i.test(link.icon) ? link.icon : link.extends;
     }
     if (fuzzy && /^[a-z0-9_]+$/.test(fuzzy) && fuzzy.length >= 3) {
-      const searchDirs = [...modAtlas, path.join(VANILLA_ROOT, 'ItemIcons')];
-      for (const dir of searchDirs) {
-        let entries; try { entries = fs.readdirSync(dir); } catch { continue; }
-        const hit = entries.find(f => f.toLowerCase().includes(fuzzy) && f.endsWith('.png'));
-        if (hit) {
-          const data = fs.readFileSync(path.join(dir, hit));
-          res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' });
-          return res.end(data);
+      if (!fuzzyIndex.has(fuzzy)) {
+        let hit = null;
+        for (const dir of fuzzyDirs) {
+          let entries; try { entries = fs.readdirSync(dir); } catch { continue; }
+          const f = entries.find(x => x.toLowerCase().includes(fuzzy) && x.endsWith('.png'));
+          if (f) { hit = path.join(dir, f); break; }
         }
+        fuzzyIndex.set(fuzzy, hit); // cache the fuzzy result (positive or negative)
       }
+      const hit = fuzzyIndex.get(fuzzy);
+      if (hit) return sendPng(hit);
     }
     return sendErr(res, 404, 'icon not found: ' + safe);
   }

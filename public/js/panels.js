@@ -14,20 +14,17 @@ export function createLeftPanel(container, ctx) {
   function render() {
     const tree = ctx.tree;
     const modsPresent = [...new Set(tree.nodes.map(n => n.sourceMod))];
-    const kindsPresent = [...new Set(tree.nodes.map(n => n.kind))];
     container.innerHTML = `
       <div class="lp-search"><input type="search" placeholder="搜索 ID / 中文名 / 描述…"></div>
+      <div class="lp-block"><label class="lp-check"><input type="checkbox" id="lp-prog" ${ctx.includeProgression ? 'checked' : ''}> 包含进度树 (progression)</label></div>
       <div class="lp-block"><div class="lp-title">Mod</div>
         ${modsPresent.map(m => `<label class="lp-check"><input type="checkbox" data-mod="${esc(m)}"> ${esc(m)} <span class="cnt">${tree.nodes.filter(n => n.sourceMod === m).length}</span></label>`).join('')}
       </div>
-      <div class="lp-block"><div class="lp-title">类型</div>
-        ${kindsPresent.map(k => `<label class="lp-check"><input type="checkbox" data-kind="${k}"> ${KIND_LABELS[k] || k} <span class="cnt">${tree.nodes.filter(n => n.kind === k).length}</span></label>`).join('')}
-      </div>
-      <div class="lp-block lp-cats"><div class="lp-title">分类（研究分支 / 属性大类）</div>
-        ${tree.categories.map(c => `<label class="lp-check"><input type="checkbox" data-cat="${esc(c.id)}"> ${esc(c.label)} <span class="cnt">${tree.nodes.filter(n => n.category === c.id).length}</span></label>`).join('')}
+      <div class="lp-block lp-cats"><div class="lp-title">研究分支（对应游戏左侧大类）</div>
+        ${tree.categories.filter(c => c.kind === 'research').map(c => `<label class="lp-check"><input type="checkbox" data-cat="${esc(c.id)}"> ${esc(c.label)} <span class="cnt">${tree.nodes.filter(n => n.category === c.id).length}</span></label>`).join('')}
       </div>
       <div class="lp-block"><div class="lp-title">边类型</div>
-        ${[['parent', '层级 parent'], ['requires', '额外前置 requires'], ['prerequisite', 'ProgressionLevel 前置']].map(([t, label]) => `<label class="lp-check"><input type="checkbox" data-edge="${t}" checked> ${label}</label>`).join('')}
+        ${[['parent', '层级 parent'], ['requires', '额外前置 requires']].map(([t, label]) => `<label class="lp-check"><input type="checkbox" data-edge="${t}" checked> ${label}</label>`).join('')}
       </div>
       <div class="lp-block"><label class="lp-check"><input type="checkbox" data-flag="onlyProblems"> 只显示有问题的节点</label></div>
     `;
@@ -48,16 +45,14 @@ export function createLeftPanel(container, ctx) {
       ctx.graph.render();
       ctx.graph.fitView({ minScale: 0.45 });
     }));
-    container.querySelectorAll('[data-kind]').forEach(cb => cb.addEventListener('change', () => {
-      cb.checked ? filter.kinds.add(cb.dataset.kind) : filter.kinds.delete(cb.dataset.kind);
-      ctx.graph.render();
-      ctx.graph.fitView({ minScale: 0.45 });
-    }));
     container.querySelectorAll('[data-edge]').forEach(cb => cb.addEventListener('change', () => {
       if (cb.checked) filter.edgeTypes.delete(cb.dataset.edge); else filter.edgeTypes.add(cb.dataset.edge);
       ctx.graph.setHiddenEdges(filter.edgeTypes);
       ctx.graph.render();
     }));
+    container.querySelector('#lp-prog').addEventListener('change', (ev) => {
+      ctx.onIncludeProgression?.(ev.target.checked);
+    });
     container.querySelector('[data-flag=onlyProblems]').addEventListener('change', (ev) => {
       filter.onlyProblems = ev.target.checked;
       ctx.graph.render();
