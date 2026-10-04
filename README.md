@@ -16,6 +16,7 @@ A local editor for the **research tree** of [Undead Legacy](http://ul.subquake.c
 - Line-level diff and structured change summary
 - Export with automatic backup of the original files
 - Bilingual display names (Chinese/English) plus user-added language files for search
+- UI available in Chinese or English — toggle in the top bar, choice is remembered
 - Byte-identical round-trip: untouched files are re-serialized exactly as they were, unknown data is preserved
 
 ## Getting started

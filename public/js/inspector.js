@@ -3,9 +3,11 @@
 //   progression nodes — vanilla-format attribute/skill/book_group/perk/book
 // Edits go through commands; Unknown/Preserved data is shown, never hidden.
 // Names resolve to Chinese (fallback English) from all loaded dictionaries.
+// UI strings come from i18n.js (zh/en, switchable in the top bar).
 import { cmdSetAttr, cmdRename, cmdDeleteNode, cmdDuplicateNode, cmdSetDomAttr,
   cmdAddResearchChild, cmdRemoveResearchChild } from './model.js';
 import { resolveKey } from './parser.js';
+import { t } from './i18n.js';
 
 export function createInspector(container, ctx) {
   // ctx: {tree, cmd(cmdFactory), onDirty, locate(id), showXml(node)}
@@ -134,7 +136,7 @@ export function createInspector(container, ctx) {
   function render() {
     const c = header();
     if (!current) {
-      c.appendChild(h(`<div class="insp-empty">点击图中节点查看与编辑属性。<br><br>双击节点可快速聚焦。<br>节点下方显示的是本地化中文名称。<br>支持把任意科技树 XML 拖入窗口识别。</div>`));
+      c.appendChild(h(`<div class="insp-empty">${t('insp.emptyHtml')}</div>`));
       return;
     }
     const n = current, tree = ctx.tree;
@@ -143,7 +145,7 @@ export function createInspector(container, ctx) {
 
     // ---- unknown / preserved (shared)
     if ((n.unknownAttrs && n.unknownAttrs.length) || (n.unknownChildren && n.unknownChildren.length)) {
-      const suk = section(c, `Unknown / Preserved (${(n.unknownAttrs?.length || 0) + (n.unknownChildren?.length || 0)})`);
+      const suk = section(c, t('insp.unknownSection', { n: (n.unknownAttrs?.length || 0) + (n.unknownChildren?.length || 0) }));
       for (const ua of n.unknownAttrs || []) {
         const row = h(`<div class="insp-row unknown"><label>${esc(ua.name)}</label><div class="insp-field"><input type="text" value="${esc(ua.value)}"></div></div>`);
         suk.appendChild(row);
@@ -155,12 +157,12 @@ export function createInspector(container, ctx) {
     }
 
     // ---- source & actions (shared)
-    const ss = section(c, '来源');
-    ss.appendChild(h(`<div class="insp-hint">[${esc(n.sourceMod || '?')}] ${esc(n.sourceFile)} : 行 ${n.sourceLine || '?'}</div>`));
+    const ss = section(c, t('insp.source'));
+    ss.appendChild(h(`<div class="insp-hint">[${esc(n.sourceMod || '?')}] ${esc(n.sourceFile)} : ${t('insp.line', { n: n.sourceLine || '?' })}</div>`));
     const btns = h(`<div class="insp-btns">
-      <button class="mini" data-act="raw">原始 XML</button>
-      <button class="mini" data-act="dup">复制节点</button>
-      <button class="mini danger" data-act="del">删除节点</button>
+      <button class="mini" data-act="raw">${esc(t('insp.rawXml'))}</button>
+      <button class="mini" data-act="dup">${esc(t('insp.duplicate'))}</button>
+      <button class="mini danger" data-act="del">${esc(t('insp.deleteNode'))}</button>
     </div>`);
     ss.appendChild(btns);
     btns.querySelector('[data-act="raw"]').addEventListener('click', () => ctx.showXml(n));
@@ -172,18 +174,18 @@ export function createInspector(container, ctx) {
     });
     btns.querySelector('[data-act="del"]').addEventListener('click', () => {
       const refs = countRefs(tree, n.id);
-      const msg = `删除节点 "${n.id}"？\n\n该节点被 ${refs} 处属性引用（将一并失效，Validation 会报告悬空引用）。\n删除可通过 Undo 撤销。`;
+      const msg = t('insp.delConfirm', { id: n.id, refs });
       if (confirm(msg)) { ctx.cmd(() => cmdDeleteNode(tree, n)); ctx.onDirty(); }
     });
   }
 
   function idSection(c, n, tree) {
-    const s1 = section(c, '标识 · ' + kindLabel(n.kind));
+    const s1 = section(c, t('insp.identity') + ' · ' + kindLabel(n.kind));
     const input = fieldRow(s1, 'ID', `<input type="text" value="${esc(n.id)}">`);
     input.addEventListener('change', () => {
       const v = input.value.trim();
       if (!v || v === n.id) { render(); return; }
-      if (tree.byId.has(v)) { ctx.onError(`ID "${v}" 已存在`); render(); return; }
+      if (tree.byId.has(v)) { ctx.onError(t('insp.idExists', { v })); render(); return; }
       const prevId = n.id;
       ctx.cmd(() => cmdRename(tree, n, v));
       // research display names key off the node id itself — refresh after rename
@@ -204,47 +206,47 @@ export function createInspector(container, ctx) {
   // ------------------------------------------------------ research flavor
   function renderResearch(c, n, tree) {
     const s1 = idSection(c, n, tree);
-    let input = fieldRow(s1, '描述 desc', `<input type="text" value="${esc(n.descKey || '')}">`);
+    let input = fieldRow(s1, t('insp.desc'), `<input type="text" value="${esc(n.descKey || '')}">`);
     input.addEventListener('change', () => { ctx.cmd(() => cmdSetAttr(tree, n, 'desc', input.value || undefined)); ctx.onDirty(); });
     const descResolved = n.descKey ? resolveKey(tree, n.descKey) : null;
     if (n.descKey) {
-      s1.appendChild(h(`<div class="insp-hint ${descResolved == null ? 'warn' : ''}">${descResolved == null ? '⚠ 未找到' : esc(descResolved)}</div>`));
+      s1.appendChild(h(`<div class="insp-hint ${descResolved == null ? 'warn' : ''}">${descResolved == null ? esc(t('insp.notFound')) : esc(descResolved)}</div>`));
     }
-    input = fieldRow(s1, '图标 icon（符号）', `<input type="text" value="${esc(n.icon || '')}">`);
+    input = fieldRow(s1, t('insp.iconSymbol'), `<input type="text" value="${esc(n.icon || '')}">`);
     input.addEventListener('change', () => { ctx.cmd(() => cmdSetAttr(tree, n, 'icon', input.value || undefined)); ctx.onDirty({ type: 'content', node: n }); });
 
     const r = n.research;
-    const sr = section(c, '研究设置');
-    bindField(sr, '前置研究 parent', `<select><option value="">（根节点）</option>${tree.nodes.filter(x => x.kind === 'research' && x.id !== n.id).map(x => `<option value="${esc(x.id)}" ${x.id === n.parentId ? 'selected' : ''}>${esc(x.display || x.id)}</option>`).join('')}</select>`,
+    const sr = section(c, t('insp.researchSettings'));
+    bindField(sr, t('insp.parent'), `<select><option value="">${esc(t('insp.rootOption'))}</option>${tree.nodes.filter(x => x.kind === 'research' && x.id !== n.id).map(x => `<option value="${esc(x.id)}" ${x.id === n.parentId ? 'selected' : ''}>${esc(x.display || x.id)}</option>`).join('')}</select>`,
       (v) => { ctx.cmd(() => cmdSetAttr(tree, n, 'parent', v || undefined)); ctx.onDirty(); });
-    bindField(sr, '坐标 pos（布局提示）', `<input type="text" value="${esc(r.pos || '')}" placeholder="x,y">`,
+    bindField(sr, t('insp.pos'), `<input type="text" value="${esc(r.pos || '')}" placeholder="x,y">`,
       (v) => { ctx.cmd(() => cmdSetAttr(tree, n, 'pos', v || undefined)); ctx.onDirty(); });
     attachDatalist(c, 'dl-areas', [...new Set(tree.nodes.filter(x => x.kind === 'research').map(x => x.research?.area).filter(Boolean))]);
-    bindField(sr, '区域 area', `<input type="text" value="${esc(r.area || '')}" list="dl-areas">`,
+    bindField(sr, t('insp.area'), `<input type="text" value="${esc(r.area || '')}" list="dl-areas">`,
       (v) => { ctx.cmd(() => cmdSetAttr(tree, n, 'area', v || undefined)); ctx.onDirty(); });
     attachDatalist(c, 'dl-rcats', [...new Set(tree.nodes.filter(x => x.kind === 'research').map(x => x.category).filter(x => x && x !== 'research'))]);
-    bindField(sr, '分类 category', `<input type="text" value="${esc(n.category === 'research' ? '' : n.category || '')}" list="dl-rcats">`,
+    bindField(sr, t('insp.category'), `<input type="text" value="${esc(n.category === 'research' ? '' : n.category || '')}" list="dl-rcats">`,
       (v) => { ctx.cmd(() => cmdSetAttr(tree, n, 'category', v || undefined)); ctx.onDirty(); });
-    bindField(sr, '初始解锁 unlocked', `<select><option value="">否</option><option value="true" ${r.unlocked ? 'selected' : ''}>true</option></select>`,
+    bindField(sr, t('insp.unlocked'), `<select><option value="">否</option><option value="true" ${r.unlocked ? 'selected' : ''}>true</option></select>`,
       (v) => { ctx.cmd(() => cmdSetAttr(tree, n, 'unlocked', v || undefined)); ctx.onDirty(); });
     attachDatalist(c, 'dl-rnodes', tree.nodes.filter(x => x.kind === 'research').map(x => x.id));
-    bindField(sr, '额外前置 requires', `<input type="text" value="${esc((r.requiresList || []).join(','))}" list="dl-rnodes">`,
+    bindField(sr, t('insp.requires'), `<input type="text" value="${esc((r.requiresList || []).join(','))}" list="dl-rnodes">`,
       (v) => { ctx.cmd(() => cmdSetAttr(tree, n, 'requires', v || undefined)); ctx.onDirty(); });
 
     // unlocks — implicit (same-name) first, then explicit entries
-    const implicitKind = { item: '物品', block: '方块', recipe: '配方' }[r.sameName] || null;
-    const su = section(c, `解锁物品 unlocks (${r.unlocks.length + (implicitKind ? 1 : 0)})`, ' <button class="mini" data-act="add-unlock">＋ 添加</button>');
+    const implicitKind = { item: 'insp.kindItem', block: 'insp.kindBlock', recipe: 'insp.kindRecipe' }[r.sameName] || null;
+    const su = section(c, `${t('insp.unlocks')} (${r.unlocks.length + (implicitKind ? 1 : 0)})`, ` <button class="mini" data-act="add-unlock">${esc(t('insp.add'))}</button>`);
     if (implicitKind) {
       const izh = resolveKey(tree, n.id);
       su.appendChild(h(`<div class="insp-pre-wrap">
-        <div class="insp-pre" title="研究名与同名${implicitKind}——游戏自动解锁它的制作配方。改名会同步改变隐式解锁目标。">
-          <span class="badge pe">同名${implicitKind}</span>
+        <div class="insp-pre" title="${esc(t('insp.sameNameTitle', { kind: t(implicitKind) }))}">
+          <span class="badge pe">${esc(t('insp.sameName', { kind: t(implicitKind) }))}</span>
           <input class="pre-target" type="text" value="${esc(n.id)}" disabled>
         </div>
         ${izh ? `<div class="insp-zh">${esc(izh)}</div>` : ''}
       </div>`));
     }
-    if (!r.unlocks.length && !implicitKind) su.appendChild(h('<div class="insp-hint">无解锁（研究名不同名任何物品/方块/配方，也没有显式 unlocks）</div>'));
+    if (!r.unlocks.length && !implicitKind) su.appendChild(h(`<div class="insp-hint">${esc(t('insp.noUnlocks'))}</div>`));
     for (const u of r.unlocks) {
       const uzh = resolveKey(tree, u.name);
       const row = h(`<div class="insp-pre-wrap">
@@ -271,16 +273,16 @@ export function createInspector(container, ctx) {
     });
 
     // ingredients — research cost
-    const si = section(c, `研究消耗 ingredients (${r.ingredients.length})`, ' <button class="mini" data-act="add-ing">＋ 添加</button>');
+    const si = section(c, `${t('insp.ingredients')} (${r.ingredients.length})`, ` <button class="mini" data-act="add-ing">${esc(t('insp.add'))}</button>`);
     for (const ing of r.ingredients) {
       const izh = resolveKey(tree, ing.name);
       const row = h(`<div class="insp-pre-wrap">
         <div class="insp-pre">
           <input class="pre-target" type="text" value="${esc(ing.name)}" spellcheck="false" placeholder="输入中文或键名…">
-          <input class="pre-val" type="text" value="${esc(ing.count)}" size="4" title="数量">
-          <button class="mini danger" title="删除">✕</button>
+          <input class="pre-val" type="text" value="${esc(ing.count)}" size="4" title="${esc(t('insp.countTitle'))}">
+          <button class="mini danger" title="✕">✕</button>
         </div>
-        ${izh ? `<div class="insp-zh">${esc(izh)}</div>` : `<div class="insp-zh dim">（词典中无此键 — 可加入 TechTreeIDE/dictionary.csv）</div>`}
+        ${izh ? `<div class="insp-zh">${esc(izh)}</div>` : `<div class="insp-zh dim">${esc(t('insp.noDict'))}</div>`}
       </div>`);
       si.appendChild(row);
       const nameInp = row.querySelector('.pre-target');
@@ -307,22 +309,22 @@ export function createInspector(container, ctx) {
   // ------------------------------------------------------ progression flavor
   function renderProgression(c, n, tree) {
     const s1 = idSection(c, n, tree);
-    let input = fieldRow(s1, '名称键 name_key', `<input type="text" value="${esc(n.nameKey || '')}">`);
+    let input = fieldRow(s1, t('insp.nameKey'), `<input type="text" value="${esc(n.nameKey || '')}">`);
     input.addEventListener('change', () => { ctx.cmd(() => cmdSetAttr(tree, n, 'name_key', input.value || undefined)); ctx.onDirty(); });
     const nkResolved = n.nameKey && n.nameKey !== 'null' ? resolveKey(tree, n.nameKey) : null;
     if (n.nameKey && n.nameKey !== 'null') {
-      s1.appendChild(h(`<div class="insp-hint ${nkResolved == null ? 'warn' : ''}">${nkResolved == null ? '⚠ 未找到' : esc(nkResolved)}</div>`));
+      s1.appendChild(h(`<div class="insp-hint ${nkResolved == null ? 'warn' : ''}">${nkResolved == null ? esc(t('insp.notFound')) : esc(nkResolved)}</div>`));
     }
-    input = fieldRow(s1, '描述键 desc_key', `<input type="text" value="${esc(n.descKey || '')}">`);
+    input = fieldRow(s1, t('insp.descKey'), `<input type="text" value="${esc(n.descKey || '')}">`);
     input.addEventListener('change', () => { ctx.cmd(() => cmdSetAttr(tree, n, 'desc_key', input.value || undefined)); ctx.onDirty(); });
     const dResolved = n.descKey && n.descKey !== 'null' ? resolveKey(tree, n.descKey) : null;
     if (n.descKey && n.descKey !== 'null') {
-      s1.appendChild(h(`<div class="insp-hint ${dResolved == null ? 'warn' : ''}">${dResolved == null ? '⚠ 未找到' : esc(dResolved)}</div>`));
+      s1.appendChild(h(`<div class="insp-hint ${dResolved == null ? 'warn' : ''}">${dResolved == null ? esc(t('insp.notFound')) : esc(dResolved)}</div>`));
     }
-    input = fieldRow(s1, '图标 icon', `<input type="text" value="${esc(n.icon || '')}">`);
+    input = fieldRow(s1, t('insp.icon'), `<input type="text" value="${esc(n.icon || '')}">`);
     input.addEventListener('change', () => { ctx.cmd(() => cmdSetAttr(tree, n, 'icon', input.value || undefined)); ctx.onDirty({ type: 'content', node: n }); });
 
-    const sp = section(c, '等级与消耗');
+    const sp = section(c, t('insp.levelCost'));
     bindField(sp, 'min_level', `<input type="number" step="1" value="${n.minLevel ?? ''}">`,
       (v) => { ctx.cmd(() => cmdSetAttr(tree, n, 'min_level', v === '' ? undefined : v)); ctx.onDirty(); });
     bindField(sp, 'max_level', `<input type="number" step="1" value="${n.maxLevel ?? ''}">`,
@@ -332,23 +334,24 @@ export function createInspector(container, ctx) {
     bindField(sp, 'cost_multiplier_per_level', `<input type="number" step="0.01" value="${n.costMultiplier ?? ''}">`,
       (v) => { ctx.cmd(() => cmdSetAttr(tree, n, 'cost_multiplier_per_level', v === '' ? undefined : v)); ctx.onDirty(); });
 
-    const sq = section(c, '层级与前置');
+    const sq = section(c, t('insp.hierarchy'));
     const parentKinds = { attribute: [], skill: ['attribute'], book_group: ['attribute'], perk: ['skill', 'book_group'], book: ['book_group', 'skill'], progression: [] }[n.kind] || [];
     const candidates = tree.nodes.filter(x => parentKinds.includes(x.kind) && x.id !== n.id);
-    bindField(sq, '父节点 parent', `<select><option value="">（根节点）</option>${candidates.map(x => `<option value="${esc(x.id)}" ${x.id === n.parentId ? 'selected' : ''}>${esc(x.display || x.id)}</option>`).join('')}</select>`,
+    bindField(sq, t('insp.parentNode'), `<select><option value="">${esc(t('insp.rootOption'))}</option>${candidates.map(x => `<option value="${esc(x.id)}" ${x.id === n.parentId ? 'selected' : ''}>${esc(x.display || x.id)}</option>`).join('')}</select>`,
       (v) => { ctx.cmd(() => cmdSetAttr(tree, n, 'parent', v || undefined)); ctx.onDirty(); });
     if (n.prerequisites && n.prerequisites.length) {
-      sq.appendChild(h(`<div class="insp-hint">ProgressionLevel 前置引用:</div>`));
+      sq.appendChild(h(`<div class="insp-hint">${esc(t('insp.prereqList'))}</div>`));
       for (const p of n.prerequisites) {
         sq.appendChild(h(`<div class="insp-hint">→ ${esc(p.target)} ${esc(p.operation)} ${esc(p.value)}</div>`));
       }
     } else {
-      sq.appendChild(h(`<div class="insp-hint dim">无 ProgressionLevel 前置（效果体内的条件已保留在 XML 中）</div>`));
+      sq.appendChild(h(`<div class="insp-hint dim">${esc(t('insp.noPrereq'))}</div>`));
     }
   }
 
   function kindLabel(k) {
-    return { attribute: '属性大类', skill: '技能', book_group: '书组', perk: 'Perk', book: '书', progression: '进度节点', research: '研究节点' }[k] || k;
+    return { attribute: t('insp.kind.attribute'), skill: t('insp.kind.skill'), book_group: t('insp.kind.book_group'),
+      perk: t('insp.kind.perk'), book: t('insp.kind.book'), progression: t('insp.kind.progression'), research: t('insp.kind.research') }[k] || k;
   }
 
   function countRefs(tree, id) {

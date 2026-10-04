@@ -11,6 +11,7 @@ import { createLeftPanel, createBottomPanel } from './panels.js';
 import { createExporter } from './exporter.js';
 import { validate } from './validator.js';
 import { generateFiles, getGenerateFilesCalls } from './generator.js';
+import { t, getLang, setLang, applyStatic } from './i18n.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -78,24 +79,30 @@ function serializeLength(dom) {
 } // [{mod:'(drop)', modRoot:null, path, role, text, bom, sha1}]
 
 function toast(msg, kind = 'info') {
-  const t = document.createElement('div');
-  t.className = 'toast ' + kind;
-  t.textContent = msg;
-  ui.toastArea.appendChild(t);
-  setTimeout(() => { t.classList.add('fade'); setTimeout(() => t.remove(), 600); }, 4200);
+  const t2 = document.createElement('div');
+  t2.className = 'toast ' + kind;
+  t2.textContent = msg;
+  ui.toastArea.appendChild(t2);
+  setTimeout(() => { t2.classList.add('fade'); setTimeout(() => t2.remove(), 600); }, 4200);
+}
+
+// The toggle shows the language you would switch TO.
+function refreshLangButton() {
+  const b = $('#btnLang');
+  if (b) b.textContent = getLang() === 'zh' ? 'EN' : '中文';
 }
 
 function updateStatus(extra = '') {
-  if (!tree) { ui.status.textContent = '未加载'; return; }
+  if (!tree) { ui.status.textContent = t('status.unloaded'); return; }
   // uses the dirty cache — selecting/panning/zooming never serializes XML here
   const sel = graph?.state.selected.size || 0;
   ui.status.innerHTML =
-    `<b>${tree.mods?.length || 0} 个 Mod</b>` +
-    ` · 节点 ${tree.nodes.length} · 边 ${tree.edges.length}` +
-    ` · <span class="${dirty ? 'dirty' : 'clean'}">${dirty ? `● 有未导出修改 (${dirtyFiles.size} 文件)` : '○ 与原始文件一致'}</span>` +
-    (viewDirty ? ' · <span class="clean">布局已调整（仅视图，不写入 XML）</span>' : '') +
-    ` · 选中 ${sel}` +
-    (commands.canUndo ? ` · 撤销可用: ${commands.label}` : '') +
+    `<b>${t('status.mods', { n: tree.mods?.length || 0 })}</b>` +
+    ` · ${t('status.nodesEdges', { n: tree.nodes.length, m: tree.edges.length })}` +
+    ` · <span class="${dirty ? 'dirty' : 'clean'}">${dirty ? t('status.dirty', { n: dirtyFiles.size }) : t('status.clean')}</span>` +
+    (viewDirty ? ` · <span class="clean">${t('status.viewDirty')}</span>` : '') +
+    ` · ${t('status.selected', { n: sel })}` +
+    (commands.canUndo ? ` · ${t('status.undoAvailable', { label: commands.label })}` : '') +
     (extra ? ` · ${extra}` : '');
 }
 
@@ -115,7 +122,7 @@ function runValidation(silent = false) {
   updateStatus(`validation: ✖${result.summary.errors} ⚠${result.summary.warnings} ℹ${result.summary.infos}`);
   if (!silent) {
     bottom.switchTo('problems');
-    toast(`Validation 完成: ${result.summary.errors} errors / ${result.summary.warnings} warnings / ${result.summary.infos} infos`, result.summary.errors ? 'error' : 'ok');
+    toast(t('status.validation', { e: result.summary.errors, w: result.summary.warnings, i: result.summary.infos }), result.summary.errors ? 'error' : 'ok');
   }
   return result;
 }
@@ -125,7 +132,7 @@ async function loadWorkspace(modsDirArg, scanResult) {
   viewDirty = false; // layout state is restored from localStorage below
   let scan = scanResult;
   if (!scan) {
-    toast('扫描 Mods 文件夹…');
+    toast(t('toast.scanning'));
     scan = await apiScan(modsDirArg);
     if (!scan.ok) { toast(scan.error, 'error'); return false; }
   }
@@ -146,7 +153,7 @@ async function loadWorkspace(modsDirArg, scanResult) {
   runValidation(true);
   updateStatus();
   graph.fitView({ minScale: 0.55 }); // LAST — the transform must survive everything above
-  toast(`已加载 ${bundle.mods.length} 个 Mod: ${tree.nodes.length} 节点 / ${tree.edges.length} 边（${[...new Set(tree.nodes.map(n => n.sourceMod))].length} 个 Mod 含科技树）`, 'ok');
+  toast(t('toast.loaded', { n: bundle.mods.length, nodes: tree.nodes.length, edges: tree.edges.length, m: [...new Set(tree.nodes.map(n => n.sourceMod))].length }), 'ok');
   return true;
 }
 
@@ -161,7 +168,7 @@ function cmd(factory) {
     if (keys) { for (const k of keys) markDirty(k); } else markDirty(null);
     updateStatus();
   }
-  catch (e) { toast('操作失败: ' + e.message, 'error'); }
+  catch (e) { toast(t('toast.opFailed', { msg: e.message }), 'error'); }
 }
 function onDirty(hint) {
   updateStatus();
@@ -180,7 +187,7 @@ function onDirty(hint) {
 }
 function locate(id) {
   const n = tree.byId.get(id);
-  if (!n) { toast(`节点 "${id}" 不存在`, 'error'); return; }
+  if (!n) { toast(t('locate.missing', { id }), 'error'); return; }
   graph.selectNode(id, { focus: true });
   inspector.show(n);
 }
@@ -226,7 +233,7 @@ function initPanels() {
   ctx.showProblems = () => { bottom.switchTo('problems'); bottom.render(); };
   ctx.onIncludeProgression = (v) => {
     if (v === includeProgression) return;
-    if (dirty && !confirm('重新加载将丢弃未导出的修改。继续?')) { leftPanel.render(); return; }
+    if (dirty && !confirm(t('confirm.reloadDirty'))) { leftPanel.render(); return; }
     includeProgression = v;
     loadWorkspace(null, window.__lastScan);
   };
@@ -243,22 +250,32 @@ function initPanels() {
     const text = await file.text();
     const name = file.name.replace(/\.txt$/i, '');
     const entries = text.split(/\r?\n/).filter(l => l.trim() && !l.trim().startsWith('#')).length;
-    if (!entries) { toast('语言文件为空或无法解析（需要 Key,译文 两列 CSV，UTF-8）', 'error'); return; }
-    if (dirty && !confirm('添加语言文件将重新加载工作区，未导出的修改会丢失。继续?')) return;
+    if (!entries) { toast(t('toast.langEmpty'), 'error'); return; }
+    if (dirty && !confirm(t('confirm.langReload'))) return;
     try {
       const r = await apiAddLang(name, text);
-      toast(`已添加语言文件 ${r.name}（${r.entries} 条）—— 搜索与名称联想现在支持该语言`, 'ok');
+      toast(t('toast.langAdded', { name: r.name, n: r.entries }), 'ok');
       await rescanWorkspace();
-    } catch (e) { toast('添加语言文件失败: ' + e.message, 'error'); }
+    } catch (e) { toast(t('toast.langAddFailed', { msg: e.message }), 'error'); }
   };
   ctx.removeLanguageFile = async (name) => {
-    if (!confirm(`删除语言文件 "${name}"？该语言的译文将不再参与搜索。`)) return;
-    if (dirty && !confirm('重新加载将丢弃未导出的修改。继续?')) return;
+    if (!confirm(t('confirm.langDelete', { name }))) return;
+    if (dirty && !confirm(t('confirm.reloadDirty'))) return;
     try {
       await apiDeleteLang(name);
-      toast(`已删除语言文件 ${name}`, 'ok');
+      toast(t('toast.langDeleted', { name }), 'ok');
       await rescanWorkspace();
-    } catch (e) { toast('删除语言文件失败: ' + e.message, 'error'); }
+    } catch (e) { toast(t('toast.langDelFailed', { msg: e.message }), 'error'); }
+  };
+  // UI language toggle — static chrome + all dynamically rendered panels
+  $('#btnLang').onclick = () => {
+    setLang(getLang() === 'zh' ? 'en' : 'zh');
+    applyStatic();
+    refreshLangButton();
+    leftPanel.render();
+    bottom.render();
+    updateStatus();
+    inspector.refresh();
   };
   exporter = createExporter({
     tree, modsDir: ctx.modsDir,
@@ -273,8 +290,8 @@ function initPanels() {
   $('#btnDiff').onclick = () => { bottom.switchTo('diff'); bottom.render(); };
   $('#btnExport').onclick = () => exporter.run({ confirmWrite: true }).then(r => { if (r?.ok) updateStatus(); });
   $('#btnSave').onclick = () => exporter.run({ confirmWrite: true }).then(r => { if (r?.ok) updateStatus(); });
-  $('#btnUndo').onclick = () => { try { const c = commands.undo(); if (c) { recomputeDirty(); onDirty(); toast('撤销: ' + c.label); } } catch (e) { toast('撤销失败: ' + e.message, 'error'); console.error(e); } };
-  $('#btnRedo').onclick = () => { const c = commands.redo(); if (c) { recomputeDirty(); onDirty(); toast('重做: ' + c.label); } };
+  $('#btnUndo').onclick = () => { try { const c = commands.undo(); if (c) { recomputeDirty(); onDirty(); toast(t('toast.undone', { label: c.label })); } } catch (e) { toast(t('toast.undoFailed', { msg: e.message }), 'error'); console.error(e); } };
+  $('#btnRedo').onclick = () => { const c = commands.redo(); if (c) { recomputeDirty(); onDirty(); toast(t('toast.redone', { label: c.label })); } };
   $('#btnOpen').onclick = () => ui.openDialog.showModal();
   $('#btnOpenGo').onclick = async () => {
     const path = $('#openPath').value.trim();
@@ -313,17 +330,17 @@ window.addEventListener('dragover', (ev) => { ev.preventDefault(); ev.dataTransf
 window.addEventListener('drop', async (ev) => {
   ev.preventDefault();
   const files = [...(ev.dataTransfer?.files || [])].filter(f => /\.xml$/i.test(f.name));
-  if (!files.length) { toast('请拖入 .xml 文件', 'error'); return; }
-  if (dirty && !confirm('拖入将按当前扫描+已拖入文件重建模型，未导出的修改会丢失。继续?')) return;
+  if (!files.length) { toast(t('drop.noXml'), 'error'); return; }
+  if (dirty && !confirm(t('confirm.dropReload'))) return;
   let added = 0, skipped = 0;
   for (const f of files) {
     const text = await f.text();
     const role = classifyXml(text, f.name);
-    if (!role) { skipped++; toast(`无法识别 ${f.name}（未找到 research/progression 结构）`, 'error'); continue; }
+    if (!role) { skipped++; toast(t('drop.unknown', { name: f.name }), 'error'); continue; }
     droppedSources = droppedSources.filter(s => s.path !== '(drop)/' + f.name);
     droppedSources.push({ mod: '(拖入)', modRoot: null, path: '(drop)/' + f.name, role, text, bom: null, sha1: '' });
     added++;
-    toast(`已识别 ${f.name} → ${role === 'research' ? '研究树' : '进度树'}`, 'ok');
+    toast(t('drop.recognized', { name: f.name, role: role === 'research' ? t('drop.roleResearch') : t('drop.roleProgression') }), 'ok');
   }
   if (added) {
     await loadWorkspace(null, window.__lastScan);
@@ -367,6 +384,8 @@ function restorePositions() {
     get dirty() { return dirty; },
     get viewDirty() { return viewDirty; },
   };
+  applyStatic();
+  refreshLangButton();
   try {
     const scan = await apiDefaults();
     window.__lastScan = scan.ok ? scan : null;
@@ -374,11 +393,11 @@ function restorePositions() {
       $('#openPath').value = scan.modsDir;
       await loadWorkspace(scan.modsDir, scan);
     } else {
-      toast(scan.error || '自动扫描失败 — 请通过 Open Mod 手动指定 Mods 目录', 'error');
+      toast(scan.error || t('toast.scanFallback'), 'error');
       ui.openDialog.showModal();
     }
   } catch (e) {
-    toast('初始化失败: ' + e.message, 'error');
+    toast(t('toast.initFailed', { msg: e.message }), 'error');
     console.error(e);
   }
 })();

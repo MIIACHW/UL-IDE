@@ -8,39 +8,40 @@
 <body>
   <div id="topbar">
     <span class="brand">7DTD TechTree IDE</span>
-    <button id="btnOpen" title="打开其他 Mod 文件夹">Open Mod</button>
+    <button id="btnOpen" data-i18n="topbar.open" title="打开其他 Mod 文件夹">Open Mod</button>
     <span class="sep"></span>
-    <button id="btnUndo" title="Ctrl+Z">Undo</button>
-    <button id="btnRedo" title="Ctrl+Y">Redo</button>
+    <button id="btnUndo" data-i18n="topbar.undo" title="Ctrl+Z">Undo</button>
+    <button id="btnRedo" data-i18n="topbar.redo" title="Ctrl+Y">Redo</button>
     <span class="sep"></span>
-    <button id="btnValidate" class="accent">Validate</button>
-    <button id="btnDiff">Diff</button>
-    <button id="btnSave" class="primary" title="Ctrl+S — 校验→备份→写入 Mod">Save</button>
-    <button id="btnExport" class="primary">Export</button>
+    <button id="btnValidate" class="accent" data-i18n="topbar.validate">Validate</button>
+    <button id="btnDiff" data-i18n="topbar.diff">Diff</button>
+    <button id="btnSave" class="primary" data-i18n="topbar.save" data-i18n-title="topbar.saveTitle">Save</button>
+    <button id="btnExport" data-i18n="topbar.export">Export</button>
     <span class="sep"></span>
     <span class="views">
-      <span class="dim" style="font-size:12px;margin-right:4px">研究树</span>
-      <button id="btnFit" title="F">⤢ 适配</button>
+      <span class="dim" style="font-size:12px;margin-right:4px" data-i18n="topbar.researchLabel">研究树</span>
+      <button id="btnFit" data-i18n="topbar.fit" data-i18n-title="topbar.fitTitle">⤢ 适配</button>
     </span>
+    <button id="btnLang" title="切换界面语言 / switch UI language">EN</button>
     <span id="status"></span>
   </div>
 
   <div id="main">
-    <div id="left"><div class="panel-label">Technologies</div></div>
+    <div id="left"><div class="panel-label" data-i18n="panel.left">Technologies</div></div>
     <div id="center-wrap">
       <div id="center"></div>
-      <div id="center-hint">滚轮缩放 · 拖动平移 · Shift+拖动框选 · 双击节点聚焦 · 可拖入科技树 XML 自动识别</div>
+      <div id="center-hint" data-i18n="center.hint">滚轮缩放 · 拖动平移 · Shift+拖动框选 · 双击节点聚焦 · 可拖入科技树 XML 自动识别</div>
     </div>
-    <div id="right"><div class="panel-label">Node Inspector</div><div class="insp-content"></div></div>
+    <div id="right"><div class="panel-label" data-i18n="panel.inspector">Node Inspector</div><div class="insp-content"></div></div>
   </div>
 
   <div id="bottomResizer"></div>
   <div id="bottom">
     <div class="bp-inner">
       <div class="bp-tabs">
-        <button data-tab="problems" class="active">Problems</button>
-        <button data-tab="xml">XML Preview</button>
-        <button data-tab="diff">Diff</button>
+        <button data-tab="problems" class="active" data-i18n="tab.problems">Problems</button>
+        <button data-tab="xml" data-i18n="tab.xml">XML Preview</button>
+        <button data-tab="diff" data-i18n="tab.diff">Diff</button>
       </div>
       <div class="bp-body"></div>
     </div>
@@ -50,12 +51,12 @@
 
   <dialog id="openDialog">
     <form method="dialog">
-      <h3>打开 Mod 文件夹</h3>
-      <p class="dim">输入 Mods 目录（自动扫描其中所有 Mod 的科技树 XML）或单个 Mod 目录：</p>
+      <h3 data-i18n="dialog.title">打开 Mod 文件夹</h3>
+      <p class="dim" data-i18n="dialog.hint">输入 Mods 目录（自动扫描其中所有 Mod 的科技树 XML）或单个 Mod 目录：</p>
       <input id="openPath" type="text" style="width:520px" spellcheck="false">
       <div class="dlg-btns">
-        <button type="button" id="btnOpenDefault" class="mini">使用当前 Mod (UndeadLegacy)</button>
-        <button type="button" id="btnOpenGo" class="mini primary">扫描并打开</button>
+        <button type="button" id="btnOpenDefault" class="mini" data-i18n="dialog.useCurrent">使用当前 Mod (UndeadLegacy)</button>
+        <button type="button" id="btnOpenGo" class="mini primary" data-i18n="dialog.go">扫描并打开</button>
       </div>
     </form>
   </dialog>

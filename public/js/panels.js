@@ -2,6 +2,7 @@
 import { lineDiff, structuredDiff, summarizeStructured } from './differ.js';
 import { generateFiles } from './generator.js';
 import { serializeXML } from './xmldom.js';
+import { t } from './i18n.js';
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -15,23 +16,23 @@ export function createLeftPanel(container, ctx) {
     const tree = ctx.tree;
     const modsPresent = [...new Set(tree.nodes.map(n => n.sourceMod))];
     container.innerHTML = `
-      <div class="lp-search"><input type="search" placeholder="搜索 ID / 中文名 / 描述…"></div>
-      <div class="lp-block"><label class="lp-check"><input type="checkbox" id="lp-prog" ${ctx.includeProgression ? 'checked' : ''}> 包含进度树 (progression)</label></div>
-      <div class="lp-block"><div class="lp-title">Mod</div>
+      <div class="lp-search"><input type="search" placeholder="${esc(t('left.searchPh'))}"></div>
+      <div class="lp-block"><label class="lp-check"><input type="checkbox" id="lp-prog" ${ctx.includeProgression ? 'checked' : ''}> ${esc(t('left.includeProgression'))}</label></div>
+      <div class="lp-block"><div class="lp-title">${esc(t('left.mods'))}</div>
         ${modsPresent.map(m => `<label class="lp-check"><input type="checkbox" data-mod="${esc(m)}"> ${esc(m)} <span class="cnt">${tree.nodes.filter(n => n.sourceMod === m).length}</span></label>`).join('')}
       </div>
-      <div class="lp-block lp-cats"><div class="lp-title">研究分支（对应游戏左侧大类）</div>
+      <div class="lp-block lp-cats"><div class="lp-title">${esc(t('left.branches'))}</div>
         ${tree.categories.filter(c => c.kind === 'research').map(c => `<label class="lp-check"><input type="checkbox" data-cat="${esc(c.id)}"> ${esc(c.label)} <span class="cnt">${tree.nodes.filter(n => n.category === c.id).length}</span></label>`).join('')}
       </div>
-      <div class="lp-block"><div class="lp-title">边类型</div>
-        ${[['parent', '层级 parent'], ['requires', '额外前置 requires']].map(([t, label]) => `<label class="lp-check"><input type="checkbox" data-edge="${t}" checked> ${label}</label>`).join('')}
+      <div class="lp-block"><div class="lp-title">${esc(t('left.edgeTypes'))}</div>
+        ${[['parent', 'left.edgeParent'], ['requires', 'left.edgeRequires']].map(([tg, key]) => `<label class="lp-check"><input type="checkbox" data-edge="${tg}" checked> ${esc(t(key))}</label>`).join('')}
       </div>
-      <div class="lp-block"><div class="lp-title">语言文件（多语言搜索）</div>
+      <div class="lp-block"><div class="lp-title">${esc(t('left.langTitle'))}</div>
         ${[...(tree.localization?.langs || new Map())].map(([name, m]) =>
-          `<div class="lp-check"><span> ${esc(name)} <span class="cnt">${m.size} 条</span></span> <button class="mini danger" data-lang-del="${esc(name)}" title="删除该语言文件">✕</button></div>`).join('')}
-        <button class="mini" id="lp-addlang" title="选择一个 Key,译文 格式的 .txt 文件，确认后其译文可用于搜索与名称联想">＋ 添加语言文件</button>
+          `<div class="lp-check"><span> ${esc(name)} <span class="cnt">${esc(t('left.langEntries', { n: m.size }))}</span></span> <button class="mini danger" data-lang-del="${esc(name)}" title="${esc(t('left.langDelTitle'))}">✕</button></div>`).join('')}
+        <button class="mini" id="lp-addlang" title="${esc(t('left.addLangTitle'))}">${esc(t('left.addLang'))}</button>
       </div>
-      <div class="lp-block"><label class="lp-check"><input type="checkbox" data-flag="onlyProblems"> 只显示有问题的节点</label></div>
+      <div class="lp-block"><label class="lp-check"><input type="checkbox" data-flag="onlyProblems"> ${esc(t('left.onlyProblems'))}</label></div>
     `;
     const search = container.querySelector('input[type=search]');
     let deb;
@@ -102,7 +103,7 @@ export function createBottomPanel(container, ctx) {
     const head = document.createElement('div');
     head.className = 'bp-problems-head';
     head.innerHTML = `
-      <button data-act="validate" class="mini primary">▶ 运行完整 Validation</button>
+      <button data-act="validate" class="mini primary">${esc(t('bottom.runValidation'))}</button>
       <span class="sev err">✖ ${summary.errors} errors</span>
       <span class="sev warn">⚠ ${summary.warnings} warnings</span>
       <span class="sev info">ℹ ${summary.infos} infos</span>`;
@@ -120,12 +121,12 @@ export function createBottomPanel(container, ctx) {
         <span class="loc dim">${esc(p.sourceFile || '')}${p.line ? ':' + p.line : ''}</span>`;
       if (p.nodeId) {
         row.classList.add('clickable');
-        row.title = '点击在图中定位';
+        row.title = t('bottom.clickLocate');
         row.addEventListener('click', () => ctx.locate(p.nodeId));
       }
       list.appendChild(row);
     }
-    if (problems.length > 800) list.appendChild(document.createTextNode(`… 共 ${problems.length} 条`));
+    if (problems.length > 800) list.appendChild(document.createTextNode(t('bottom.moreCount', { n: problems.length })));
     body.appendChild(list);
   }
 
@@ -159,7 +160,7 @@ export function createBottomPanel(container, ctx) {
     const tree = ctx.tree;
     const bar = document.createElement('div');
     bar.className = 'bp-diff-bar';
-    bar.innerHTML = `<button class="mini primary" data-act="gen">⟳ 生成 Diff（当前模型 vs 原始文件）</button><span class="dim">导出前会自动重新生成</span>`;
+    bar.innerHTML = `<button class="mini primary" data-act="gen">${esc(t('bottom.genDiff'))}</button><span class="dim">${esc(t('bottom.autoRegen'))}</span>`;
     body.appendChild(bar);
     const out = document.createElement('div');
     body.appendChild(out);
@@ -174,9 +175,8 @@ export function createBottomPanel(container, ctx) {
       const sm = document.createElement('div');
       sm.className = 'bp-diff-summary';
       sm.innerHTML = sum.files === 0
-        ? `<span class="sev ok">✓ 无差异 — 模型与原始文件一致</span>`
-        : `<span class="sev warn">${sum.files} 个文件有变更:</span>
-           属性修改 ${sum.attrChanged} · 属性新增 ${sum.attrAdded} · 属性删除 ${sum.attrRemoved} · 元素新增 ${sum.elemAdded} · 元素删除 ${sum.elemRemoved}`;
+        ? `<span class="sev ok">${esc(t('bottom.noDiff'))}</span>`
+        : `<span class="sev warn">${esc(t('bottom.diffSummary', { n: sum.files, a: sum.attrChanged, b: sum.attrAdded, c: sum.attrRemoved, d: sum.elemAdded, e: sum.elemRemoved }))}</span>`;
       out.appendChild(sm);
       for (const sf of tree.sourceFiles) {
         const d = lineDiff(sf.text, files[sf.path]);

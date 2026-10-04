@@ -7,6 +7,7 @@ import { validate } from './validator.js';
 import { generateFiles } from './generator.js';
 import { lineDiff, structuredDiff, summarizeStructured } from './differ.js';
 import { apiBackup, apiExport } from './api.js';
+import { t } from './i18n.js';
 
 export function createExporter(ctx) {
   // ctx: {tree, modsDir, showProblems(), toast(msg, kind), log(msg)}
@@ -17,7 +18,7 @@ export function createExporter(ctx) {
     ctx.problems = { problems, summary };
     ctx.showProblems();
     if (summary.errors > 0) {
-      ctx.toast(`Validation 未通过：${summary.errors} 个 error（导出被阻止）`, 'error');
+      ctx.toast(t('exp.blocked', { n: summary.errors }), 'error');
       return { ok: false, blocked: true, summary, problems };
     }
 
@@ -35,7 +36,7 @@ export function createExporter(ctx) {
     }
 
     if (Object.keys(writable).length === 0 && dropped.length === 0) {
-      ctx.toast('没有需要导出的修改。', 'info');
+      ctx.toast(t('exp.nothing'), 'info');
       return { ok: true, nothingToDo: true, summary };
     }
 
@@ -48,11 +49,13 @@ export function createExporter(ctx) {
       const dels = d.rows.filter(r => r.type === 'del').length;
       return `  • ${key}  (+${adds} / -${dels} 行)`;
     });
-    for (const d of dropped) fileList.push(`  • ${d.key}  (拖入文件 — 将通过浏览器下载)`);
+    for (const d of dropped) fileList.push(`  • ${d.key}  (${t('exp.droppedNote')})`);
 
-    const msg = `即将写入 Mod 文件夹：\n${fileList.join('\n')}\n\n` +
-      `变更统计: 属性改 ${struct.attrChanged} / 增 ${struct.attrAdded} / 删 ${struct.attrRemoved}，元素增 ${struct.elemAdded} / 删 ${struct.elemRemoved}\n\n` +
-      `流程: 自动备份原始文件 → 写入新 XML（TechTreeIDE/export/ 留副本）。\n确认导出?`;
+    const msg = t('exp.confirm', {
+      list: fileList.join('\n'),
+      a: struct.attrChanged, b: struct.attrAdded, c: struct.attrRemoved,
+      d: struct.elemAdded, e: struct.elemRemoved,
+    });
     if (confirmWrite && !confirm(msg)) return { ok: false, cancelled: true, summary };
 
     // 4. backup + export (writable files only)
@@ -62,14 +65,14 @@ export function createExporter(ctx) {
         backup = await apiBackup(ctx.modsDir, Object.keys(writable));
         ctx.log(`已备份 → ${backup.backupDir}`);
       } catch (e) {
-        ctx.toast('备份失败，导出中止: ' + e.message, 'error');
+        ctx.toast(t('exp.backupFail', { msg: e.message }), 'error');
         return { ok: false, backupFailed: true, summary };
       }
       try {
         const res = await apiExport(ctx.modsDir, writable);
-        ctx.toast(`导出完成: ${res.written.join(', ')}（备份: ${backup.backupDir}）`, 'ok');
+        ctx.toast(t('exp.done', { files: res.written.join(', '), dir: backup.backupDir }), 'ok');
       } catch (e) {
-        ctx.toast('导出失败（原始文件已备份）: ' + e.message, 'error');
+        ctx.toast(t('exp.exportFail', { msg: e.message }), 'error');
         return { ok: false, exportFailed: true, summary };
       }
     }
@@ -85,7 +88,7 @@ export function createExporter(ctx) {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     }
-    if (dropped.length) ctx.toast(`拖入的 ${dropped.length} 个文件已通过浏览器下载（无对应 Mod 路径可写）`, 'info');
+    if (dropped.length) ctx.toast(t('toast.droppedDownloaded', { n: dropped.length }), 'info');
     return { ok: true, written: Object.keys(writable), dropped: dropped.map(d => d.key), backupDir: backup?.backupDir, summary };
   }
   return { run };
