@@ -130,6 +130,24 @@ export function applyDisplayNames(tree, displayLang = '') {
   }
 }
 
+// Research-branch labels in the left panel follow the same display language as node
+// names (branch key = group<Category>, with Melee/Ranged using their vanilla keys).
+// The default chain keeps the built-in Chinese branch names.
+export function applyCategoryLabels(tree, displayLang = '') {
+  const langs = tree.localization?.langs;
+  for (const c of tree.categories) {
+    if (c.kind !== 'research') continue;
+    const key = c.id === 'Melee' ? 'groupMeleeWeapons' : c.id === 'Ranged' ? 'groupRangedWeapons' : 'group' + c.id;
+    let v = null;
+    if (displayLang && displayLang !== 'auto') {
+      if (displayLang === 'en') v = tree.localization.en.get(key) ?? null;
+      else v = langs?.get(displayLang)?.get(key) ?? null;
+    }
+    if (v == null) v = RESEARCH_BRANCH_ZH[c.id] || resolveKey(tree, key, 'en') || c.id;
+    c.label = v;
+  }
+}
+
 const RESEARCH_BRANCH_ZH = {
   Research: '研究站', Science: '科学与工程', Tools: '工具', General: '通用',
   Melee: '近战武器', Ranged: '远程武器', Cooking: '烹饪', Farming: '种植',

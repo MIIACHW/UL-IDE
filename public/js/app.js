@@ -3,7 +3,7 @@
 // XMLs; dropped XML files are parsed client-side as additional in-memory sources.
 import { apiDefaults, apiScan, apiAddLang, apiDeleteLang } from './api.js';
 import { scanWorkspace, classifyXml } from './scanner.js';
-import { buildTechTree, searchLangText, findLangMatch, applyDisplayNames } from './parser.js';
+import { buildTechTree, searchLangText, findLangMatch, applyDisplayNames, applyCategoryLabels } from './parser.js';
 import { CommandStack } from './model.js';
 import { createGraph } from './graph.js';
 import { createInspector } from './inspector.js';
@@ -151,6 +151,7 @@ async function loadWorkspace(modsDirArg, scanResult) {
   tree = buildTechTree(bundle);
   tree.mods = bundle.mods;
   applyDisplayNames(tree, displayLang()); // chosen node-name language (default zh→en)
+  applyCategoryLabels(tree, displayLang()); // left-panel branch labels follow it too
 
   // reset UI state
   commands.undoStack.length = 0; commands.redoStack.length = 0;
@@ -280,7 +281,9 @@ function initPanels() {
   ctx.changeDisplayLang = (lang) => {
     setDisplayLang(lang);
     applyDisplayNames(tree, lang);
+    applyCategoryLabels(tree, lang);
     graph.relabelAll();
+    leftPanel.render(); // branch labels live in the left panel
     inspector.refresh();
   };
   // UI language toggle — static chrome + all dynamically rendered panels

@@ -18,16 +18,16 @@ export function createLeftPanel(container, ctx) {
     try { curNameLang = localStorage.getItem('ul-ide-display-lang') || ''; } catch { /* default */ }
     const modsPresent = [...new Set(tree.nodes.map(n => n.sourceMod))];
     container.innerHTML = `
-      <div class="lp-search"><input type="search" placeholder="${esc(t('left.searchPh'))}"></div>
+      <div class="lp-search"><input type="search" placeholder="${esc(t('left.searchPh'))}" value="${esc(ctx.graph?.state?.search || '')}"></div>
       <div class="lp-block"><label class="lp-check"><input type="checkbox" id="lp-prog" ${ctx.includeProgression ? 'checked' : ''}> ${esc(t('left.includeProgression'))}</label></div>
       <div class="lp-block"><div class="lp-title">${esc(t('left.mods'))}</div>
-        ${modsPresent.map(m => `<label class="lp-check"><input type="checkbox" data-mod="${esc(m)}"> ${esc(m)} <span class="cnt">${tree.nodes.filter(n => n.sourceMod === m).length}</span></label>`).join('')}
+        ${modsPresent.map(m => `<label class="lp-check"><input type="checkbox" data-mod="${esc(m)}" ${filter.mods.has(m) ? 'checked' : ''}> ${esc(m)} <span class="cnt">${tree.nodes.filter(n => n.sourceMod === m).length}</span></label>`).join('')}
       </div>
       <div class="lp-block lp-cats"><div class="lp-title">${esc(t('left.branches'))}</div>
-        ${tree.categories.filter(c => c.kind === 'research').map(c => `<label class="lp-check"><input type="checkbox" data-cat="${esc(c.id)}"> ${esc(c.label)} <span class="cnt">${tree.nodes.filter(n => n.category === c.id).length}</span></label>`).join('')}
+        ${tree.categories.filter(c => c.kind === 'research').map(c => `<label class="lp-check"><input type="checkbox" data-cat="${esc(c.id)}" ${filter.categories.has(c.id) ? 'checked' : ''}> ${esc(c.label)} <span class="cnt">${tree.nodes.filter(n => n.category === c.id).length}</span></label>`).join('')}
       </div>
       <div class="lp-block"><div class="lp-title">${esc(t('left.edgeTypes'))}</div>
-        ${[['parent', 'left.edgeParent'], ['requires', 'left.edgeRequires']].map(([tg, key]) => `<label class="lp-check"><input type="checkbox" data-edge="${tg}" checked> ${esc(t(key))}</label>`).join('')}
+        ${[['parent', 'left.edgeParent'], ['requires', 'left.edgeRequires']].map(([tg, key]) => `<label class="lp-check"><input type="checkbox" data-edge="${tg}" ${filter.edgeTypes.has(tg) ? '' : 'checked'}> ${esc(t(key))}</label>`).join('')}
       </div>
       <div class="lp-block"><div class="lp-title">${esc(t('left.langTitle'))}</div>
         ${[...(tree.localization?.langs || new Map())].map(([name, m]) =>
@@ -41,7 +41,7 @@ export function createLeftPanel(container, ctx) {
         </div>
         <button class="mini" id="lp-addlang" title="${esc(t('left.addLangTitle'))}">${esc(t('left.addLang'))}</button>
       </div>
-      <div class="lp-block"><label class="lp-check"><input type="checkbox" data-flag="onlyProblems"> ${esc(t('left.onlyProblems'))}</label></div>
+      <div class="lp-block"><label class="lp-check"><input type="checkbox" data-flag="onlyProblems" ${filter.onlyProblems ? 'checked' : ''}> ${esc(t('left.onlyProblems'))}</label></div>
     `;
     const search = container.querySelector('input[type=search]');
     let deb;

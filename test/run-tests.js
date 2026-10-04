@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseXML, serializeXML, setAttr, makeElement, appendElement, insertElementBefore, removeElement } from '../public/js/xmldom.js';
-import { buildTechTree, parseModLocalization, parseVanillaLocalization, resolveKey, searchLangText, findLangMatch, applyDisplayNames } from '../public/js/parser.js';
+import { buildTechTree, parseModLocalization, parseVanillaLocalization, resolveKey, searchLangText, findLangMatch, applyDisplayNames, applyCategoryLabels } from '../public/js/parser.js';
 import { classifyXml } from '../public/js/scanner.js';
 import { validate } from '../public/js/validator.js';
 import { generateFiles, isDirty, getGenerateFilesCalls } from '../public/js/generator.js';
@@ -166,7 +166,7 @@ test('parser: custom language files power multi-language search', () => {
   // langs/*.txt enter tree.localization.langs for SEARCH only — zh/en display untouched
   const base = buildTechTree(makeBundle());
   const b = makeBundle();
-  b.customLangs = [{ name: 'Japanese', path: 'langs/Japanese.txt', bom: null, text: 'researchTier1,リサーチ Tier 1\nperkDeadEyeName,デッドアイ' }];
+  b.customLangs = [{ name: 'Japanese', path: 'langs/Japanese.txt', bom: null, text: 'researchTier1,リサーチ Tier 1\nperkDeadEyeName,デッドアイ\ngroupScience,Wissenschaft' }];
   const t = buildTechTree(b);
   const jp = t.localization.langs.get('Japanese');
   assert(jp instanceof Map, 'custom lang map stored');
@@ -193,6 +193,16 @@ test('parser: custom language files power multi-language search', () => {
   applyDisplayNames(t, 'Japanese');
   const untranslated = [...t.byId.values()].find(n => !t.localization.langs.get('Japanese').has(n.id) && n.kind === 'research');
   if (untranslated) assert(untranslated.display === untranslated.id || untranslated.display === resolveKey(t, untranslated.id) || untranslated.display === resolveKey(t, untranslated.id, 'en'), 'fallback chain for untranslated nodes');
+  // left-panel branch labels follow the same display language
+  applyCategoryLabels(t, '');
+  const sci = t.categories.find(c => c.id === 'Science');
+  eq(sci.label, '科学与工程', 'auto keeps built-in zh branch name');
+  applyCategoryLabels(t, 'Japanese');
+  eq(t.categories.find(c => c.id === 'Science').label, 'Wissenschaft', 'branch label follows custom language');
+  applyCategoryLabels(t, 'en');
+  eq(t.categories.find(c => c.id === 'Science').label, resolveKey(t, 'groupScience', 'en'), 'branch label uses en column for English');
+  applyCategoryLabels(t, '');
+  eq(t.categories.find(c => c.id === 'Science').label, '科学与工程', 'restored');
 });
 
 // ------------------------------------------------------------------ validator
