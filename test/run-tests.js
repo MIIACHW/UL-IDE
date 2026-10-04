@@ -200,7 +200,14 @@ test('parser: custom language files power multi-language search', () => {
   applyCategoryLabels(t, 'Japanese');
   eq(t.categories.find(c => c.id === 'Science').label, 'Wissenschaft', 'branch label follows custom language');
   applyCategoryLabels(t, 'en');
+  const RESEARCH_BRANCH_ZH_SET = new Set(['研究站', '科学与工程', '工具', '通用', '近战武器', '远程武器', '烹饪', '种植', '护甲', '陷阱', '化学', '机械']);
   eq(t.categories.find(c => c.id === 'Science').label, resolveKey(t, 'groupScience', 'en'), 'branch label uses en column for English');
+  // regression: Cooking's group key is "groupCookingAndBrewing" — "groupCooking" does
+  // not exist, which left the branch showing the Chinese fallback in en/custom modes
+  eq(t.categories.find(c => c.id === 'Cooking').label, 'Cooking and Brewing', 'Cooking branch translated');
+  for (const c of t.categories.filter(c => c.kind === 'research')) {
+    assert(!RESEARCH_BRANCH_ZH_SET.has(c.label), `en mode fully translated: ${c.id} -> ${c.label}`);
+  }
   applyCategoryLabels(t, '');
   eq(t.categories.find(c => c.id === 'Science').label, '科学与工程', 'restored');
 });

@@ -131,13 +131,13 @@ export function applyDisplayNames(tree, displayLang = '') {
 }
 
 // Research-branch labels in the left panel follow the same display language as node
-// names (branch key = group<Category>, with Melee/Ranged using their vanilla keys).
-// The default chain keeps the built-in Chinese branch names.
+// names (branch keys per researchBranchKey). The default chain keeps the built-in
+// Chinese branch names.
 export function applyCategoryLabels(tree, displayLang = '') {
   const langs = tree.localization?.langs;
   for (const c of tree.categories) {
     if (c.kind !== 'research') continue;
-    const key = c.id === 'Melee' ? 'groupMeleeWeapons' : c.id === 'Ranged' ? 'groupRangedWeapons' : 'group' + c.id;
+    const key = researchBranchKey(c.id);
     let v = null;
     if (displayLang && displayLang !== 'auto') {
       if (displayLang === 'en') v = tree.localization.en.get(key) ?? null;
@@ -153,9 +153,19 @@ const RESEARCH_BRANCH_ZH = {
   Melee: '近战武器', Ranged: '远程武器', Cooking: '烹饪', Farming: '种植',
   Armorer: '护甲', Traps: '陷阱', Chemistry: '化学', Mechanic: '机械',
 };
+// Localization keys for the 12 research branches. Cooking's group is named
+// "CookingAndBrewing" in the localization files — "groupCooking" does not exist,
+// which left the branch untranslated outside of the built-in Chinese names.
+const RESEARCH_BRANCH_KEY = {
+  Melee: 'groupMeleeWeapons',
+  Ranged: 'groupRangedWeapons',
+  Cooking: 'groupCookingAndBrewing',
+};
+function researchBranchKey(category) {
+  return RESEARCH_BRANCH_KEY[category] || 'group' + category;
+}
 export function researchCategoryLabel(tree, category) {
-  const key = category === 'Melee' ? 'groupMeleeWeapons' : category === 'Ranged' ? 'groupRangedWeapons' : 'group' + category;
-  return RESEARCH_BRANCH_ZH[category] || resolveKey(tree, key, 'en') || category;
+  return RESEARCH_BRANCH_ZH[category] || resolveKey(tree, researchBranchKey(category), 'en') || category;
 }
 
 // ------------------------------------------------------------- helpers
