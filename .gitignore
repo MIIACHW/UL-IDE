@@ -3,3 +3,9 @@ export/
 langs/
 *.log
 node_modules/
+
+# AI assistant local files — kept out of the published repo
+AGENTS.md
+CLAUDE.md
+.zcode/
+.cursorrules
