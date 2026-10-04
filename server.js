@@ -7,9 +7,10 @@
 // always after backup. A user dictionary (dictionary.csv) supplies extra translations.
 import http from 'node:http';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { exec } from 'node:child_process';
+import { exec, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -20,7 +21,49 @@ const IDE_PARENT = path.resolve(__dirname, '..');
 const MODS_DIR = process.env.UL_MODS_DIR
   ? path.resolve(process.env.UL_MODS_DIR)
   : (fs.existsSync(path.join(IDE_PARENT, 'ModInfo.xml')) ? path.dirname(IDE_PARENT) : IDE_PARENT);
-const VANILLA_CONFIG_ROOT = process.env.UL_VANILLA_CONFIG || 'E:\\STEAM\\steamapps\\common\\7 Days To Die\\Data\\Config';
+// Vanilla game Data/Config (read-only) — used for localization-key fallback and icons.
+// Resolution order: UL_VANILLA_CONFIG env → the game folder containing the Mods folder
+// (IDE placed in-game) → Steam libraries (libraryfolders.vdf, Windows registry, common
+// drive locations) → the historical hardcoded default as a last resort. A fresh clone
+// into Mods/ therefore works with no configuration at all.
+function detectVanillaConfig() {
+  const candidates = [];
+  const pushGameRoot = (root) => { if (root) candidates.push(path.join(root, 'Data', 'Config')); };
+  pushGameRoot(path.resolve(MODS_DIR, '..'));
+
+  const steamRoots = [];
+  if (process.platform === 'win32') {
+    try {
+      const out = execSync('reg query HKCU\\Software\\Valve\\Steam /v SteamPath', { encoding: 'utf8' });
+      const m = /REG_SZ\s+(.+)/.exec(out);
+      if (m) steamRoots.push(m[1].trim());
+    } catch { /* registry unavailable */ }
+    for (const d of 'CDEFGHIJKL') {
+      steamRoots.push(`${d}:\\Steam`, `${d}:\\SteamLibrary`, `${d}:\\Program Files (x86)\\Steam`, `${d}:\\Program Files\\Steam`);
+    }
+  } else {
+    const home = os.homedir();
+    steamRoots.push(path.join(home, '.steam', 'steam'), path.join(home, '.local', 'share', 'Steam'),
+      path.join(home, 'Library', 'Application Support', 'Steam'));
+  }
+  const libs = new Set();
+  for (const root of steamRoots) {
+    try {
+      const vdf = fs.readFileSync(path.join(root, 'steamapps', 'libraryfolders.vdf'), 'utf8');
+      for (const m of vdf.matchAll(/"path"\s+"([^"]+)"/g)) libs.add(m[1].replace(/\\\\/g, '\\'));
+    } catch { /* no libraryfolders.vdf there */ }
+    libs.add(root);
+  }
+  for (const lib of libs) pushGameRoot(path.join(lib, 'steamapps', 'common', '7 Days To Die'));
+
+  for (const c of candidates) {
+    try { if (fs.existsSync(path.join(c, 'Localization.txt'))) return c; } catch { /* skip */ }
+  }
+  return null;
+}
+const VANILLA_CONFIG_ROOT = process.env.UL_VANILLA_CONFIG
+  ? path.resolve(process.env.UL_VANILLA_CONFIG)
+  : (detectVanillaConfig() || 'E:\\STEAM\\steamapps\\common\\7 Days To Die\\Data\\Config');
 const VANILLA_ROOT = path.resolve(VANILLA_CONFIG_ROOT, '..');
 const BACKUP_DIR = path.join(IDE_ROOT, 'backups');
 const EXPORT_DIR = path.join(IDE_ROOT, 'export');
@@ -468,6 +511,10 @@ function listen(port, attempts = 10) {
     console.log(` Vanilla configs:  ${VANILLA_CONFIG_ROOT} (read-only)`);
     console.log('==========================================================');
     openBrowser(`http://localhost:${port}`);
+    if (!fs.existsSync(path.join(VANILLA_CONFIG_ROOT, 'Localization.txt'))) {
+      console.warn('[ul-ide] vanilla Data/Config not found — localization-key fallback and vanilla icons are limited.');
+      console.warn('[ul-ide] set UL_VANILLA_CONFIG to your game\'s Data/Config folder to enable them.');
+    }
   });
 }
 listen(PORT);

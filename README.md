@@ -40,9 +40,9 @@ A local editor for the **research tree** of [Undead Legacy](http://ul.subquake.c
 |---|---|---|
 | `UL_IDE_PORT` | server port | `8899` (auto-increments when busy) |
 | `UL_MODS_DIR` | Mods folder to scan | parent of this folder |
-| `UL_VANILLA_CONFIG` | game `Data/Config` folder (read-only, for name/icon lookups) | `E:\STEAM\steamapps\common\7 Days To Die\Data\Config` |
+| `UL_VANILLA_CONFIG` | game `Data/Config` folder (read-only, for name/icon lookups) | **auto-detected**: the game folder containing the Mods folder, then Steam libraries (`libraryfolders.vdf` + Windows registry + common drives) |
 
-`UL_VANILLA_CONFIG` is machine-specific — set it when running anywhere else. Added language files live in `langs/`, backups in `backups/`, export copies in `export/`.
+`UL_VANILLA_CONFIG` only needs to be set when auto-detection fails (unusual install layout) — without it the IDE still works, but vanilla localization fallback and icons are limited (the server log tells you when that happens). Added language files live in `langs/`, backups in `backups/`, export copies in `export/`.
 
 ## How to use
 

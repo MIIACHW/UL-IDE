@@ -59,7 +59,7 @@ export async function scanWorkspace(scanResult, log = () => {}, { includeProgres
       bundle.vanilla.localization = vloc;
       log(`本体本地化已加载（键回退参考, ${vloc.text.length} chars）`);
     } else {
-      bundle.warnings.push('无法读取本体 Localization.txt，键回退校验将受限: ' + vloc.error);
+      bundle.warnings.push('无法读取本体 Localization.txt，键回退校验将受限: ' + vloc.error + '（可设置环境变量 UL_VANILLA_CONFIG 指向游戏 Data/Config）');
     }
   } catch (e) {
     bundle.warnings.push('本体参考读取失败: ' + e.message);
