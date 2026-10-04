@@ -15,7 +15,7 @@
 - **Inspector 编辑**：ID 改名（级联更新所有引用文件）、desc / icon / 前置研究 / pos / area / category / unlocked / requires、unlocks 与 ingredients 的增删改（名称支持中文联想）、Unknown / Preserved 数据查看与编辑。
 - **Undo / Redo**：所有编辑走命令栈（Ctrl+Z / Ctrl+Y），删除节点同样可撤销。
 - **Validation**：Duplicate ID、悬空引用、循环依赖、非法 XML 等；问题面板点击可定位到节点。
-- **Localization**：中英文显示（Mod 本地化 → 本体 `Localization.txt` 回退 → 兄弟汉化 Mod 叠加 → `dictionary.csv` 用户词典优先级最高）。
+- **Localization**：中英文显示（Mod 本地化 → 本体 `Localization.txt` 回退 → 兄弟汉化 Mod 叠加 → `dictionary.csv` 用户词典优先级最高）；可添加任意语言的 `Key,译文` 文件（`langs/*.txt`），其译文参与搜索与名称联想。
 - **Icon 解析**：按"研究名（=物品名）→ 首个 unlocks → `symbol_*` 图标（含模糊匹配）"的回退链取图，来源为本体 `ItemIcons/` 与各 Mod 的 `UIAtlases/`（Icon 继承链随 `Extends`/`Icon` 属性解析）。
 - **XML round-trip 保真**：未修改的文件序列化输出与原文件**逐字节一致**（含注释、Tab 对齐、属性顺序、未知标签、BOM）；schema 外的数据一律标记 Unknown / Preserved 保留，绝不丢弃。
 - **Diff**：行级差异 + 属性/元素级结构摘要，按文件展示。
@@ -57,6 +57,7 @@ npm start
 其他文件约定：
 
 - `dictionary.csv`（仓库根目录）：用户词典，两列 CSV `Key,schinese`，优先级高于一切本地化来源；改完刷新页面生效。
+- `langs/`：添加的额外语言文件（`<语言名>.txt`，两列 CSV `Key,译文`），见"本地化与图标解析规则"。
 - `backups/`：导出前的自动备份（见下文 Export）。
 - `export/`：每次写回 Mod 时的副本。
 
@@ -138,6 +139,7 @@ test/run-tests.js  回归测试
 ## 本地化与图标解析规则
 
 - 键解析优先级：`dictionary.csv`（用户词典）＞ 兄弟汉化 Mod 的 `Config/Localization/SChinese.txt`（按 Mods 目录序叠加，后者生效）＞ Mod 自身 English/SChinese ＞ 本体 `Data/Config/Localization.txt`（多列 CSV 回退）。
+- **添加语言文件**：左栏"语言文件（多语言搜索）"→"＋ 添加语言文件"，选择 UTF-8 的两列 CSV（`Key,译文`，与 Mod 语言文件同格式）。文件保存到 `ULTechTreeIDE/langs/<语言名>.txt`（已被 gitignore，属本地用户数据），确认后自动重新加载——该语言的译文即可用于顶部搜索框过滤和 Inspector 名称联想（联想行会显示"语言: 译文"），节点显示名仍以中/英为准。`✕` 删除后同样自动重载。
 - 研究节点的本地化键 = 研究名本身（与物品同名时游戏自动解锁该物品的制作，即"隐式解锁"）。
 - 图标回退链：研究名（物品名）→ 第一个 `<unlocks>` 名 → research 的 `icon="symbol_*"`（含模糊匹配与内置符号兜底）→ 占位图；图标文件来自本体 `Data/ItemIcons/` 与各 Mod 的 `UIAtlases/ItemIconAtlas/`、`UIAtlases/UISkills/`。
 
@@ -149,7 +151,7 @@ npm test
 node test/run-tests.js
 ```
 
-覆盖：xmldom round-trip 逐字节一致（research/progression/recipes_skills/ModInfo 四个文件）、解析数量断言、双语本地化、validator 行为、命令（改属性/改名/删除/复制/增删 unlocks 与 ingredients）与其 Undo 的字节还原、跨文件改名 dirty 跟踪、Diff。当前 31 项断言，全绿为通过标准。
+覆盖：xmldom round-trip 逐字节一致（research/progression/recipes_skills/ModInfo 四个文件）、解析数量断言、双语本地化、自定义语言文件（多语言搜索语料）、validator 行为、命令（改属性/改名/删除/复制/增删 unlocks 与 ingredients）与其 Undo 的字节还原、跨文件改名 dirty 跟踪、Diff。当前 32 项断言，全绿为通过标准。
 
 可选环境变量 `UL_VANILLA_ROOT`：指向游戏根目录（默认同 `UL_VANILLA_CONFIG` 的游戏目录），供"本体本地化键回退"相关断言使用；不可用时相关断言自动跳过。
 
@@ -170,6 +172,7 @@ node test/run-tests.js
 | `/api/readmod` | GET `?path=&root=` | 只读读取文件（`root` 缺省为 Mods 根，限根内） |
 | `/api/backup` | POST `{modRoot, files:[key]}` | 将要导出的文件备份到 `backups/<时间戳>/` |
 | `/api/export` | POST `{modRoot, files:{key:text}, confirm:true}` | 写回 Mod `Config/*.xml` 并留副本到 `export/`（必须显式 `confirm:true`） |
+| `/api/langs` | GET / POST `{name,text}` / DELETE `?name=` | 管理 `langs/` 下的自定义语言文件（多语言搜索） |
 | `/api/icon` | GET `?name=&fuzzy=` | 按物品名/符号名取图标 PNG（含继承链与模糊匹配） |
 
 文件键格式统一为 `<ModName>/<Config 相对路径>`（如 `UndeadLegacy/Config/Custom/recipes_research.xml`）。

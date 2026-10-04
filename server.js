@@ -23,8 +23,27 @@ const VANILLA_CONFIG_ROOT = process.env.UL_VANILLA_CONFIG || 'E:\\STEAM\\steamap
 const VANILLA_ROOT = path.resolve(VANILLA_CONFIG_ROOT, '..');
 const BACKUP_DIR = path.join(IDE_ROOT, 'backups');
 const EXPORT_DIR = path.join(IDE_ROOT, 'export');
+// user-added language files (Key,<translation> CSV) — extra search languages
+const LANGS_DIR = path.join(IDE_ROOT, 'langs');
 const PORT = Number(process.env.UL_IDE_PORT || 8899);
 const PUBLIC_DIR = path.join(IDE_ROOT, 'public');
+
+function langFileName(name) {
+  const safe = String(name || '').replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^\.+/, '').slice(0, 64);
+  if (!safe) return null;
+  return safe.toLowerCase().endsWith('.txt') ? safe : safe + '.txt';
+}
+function listLangFiles() {
+  const langs = [];
+  try {
+    for (const f of fs.readdirSync(LANGS_DIR)) {
+      if (!f.toLowerCase().endsWith('.txt')) continue;
+      const st = fs.statSync(path.join(LANGS_DIR, f));
+      langs.push({ name: f.slice(0, -4), size: st.size });
+    }
+  } catch { /* no langs dir yet */ }
+  return langs;
+}
 
 // ---------------------------------------------------------------- helpers
 function send(res, status, body, type = 'application/json; charset=utf-8') {
@@ -209,12 +228,23 @@ function scanMods(modsDir) {
     customDictionary = { text, bom };
   }
 
+  // user-added language files (langs/*.txt, Key,<translation> CSV) — extra search languages
+  const customLangs = [];
+  for (const f of listLangFiles()) {
+    try {
+      const buf = fs.readFileSync(path.join(LANGS_DIR, f.name + '.txt'));
+      const { bom, text } = detectBom(buf);
+      customLangs.push({ name: f.name, path: 'langs/' + f.name + '.txt', bom, size: buf.length, text });
+    } catch { /* skip unreadable file */ }
+  }
+
   return {
     ok: true,
     modsDir,
     mods: mods.map(m => ({ name: m.name, displayName: m.displayName, version: m.version, modRoot: m.modRoot })),
     sourceFiles,
     localizationFiles,
+    customLangs,
     nameIndex: { items: [...nameIndex.items], blocks: [...nameIndex.blocks], recipes: [...nameIndex.recipes] },
     customDictionary,
     vanillaConfigRoot: VANILLA_CONFIG_ROOT,
@@ -318,6 +348,29 @@ async function handleApi(req, res, url) {
       if (body.confirm !== true) throw new Error('Export requires confirm:true');
       return send(res, 200, { ok: true, ...doExport(body.modRoot, body.files) });
     } catch (e) { return sendErr(res, 400, e.message); }
+  }
+  if (route === '/api/langs' && req.method === 'GET') {
+    return send(res, 200, { ok: true, langs: listLangFiles() });
+  }
+  if (route === '/api/langs' && req.method === 'POST') {
+    const body = JSON.parse((await readBody(req)) || '{}');
+    const file = langFileName(body.name);
+    const text = typeof body.text === 'string' ? body.text : '';
+    if (!file) return sendErr(res, 400, 'language file name required');
+    if (!text.trim()) return sendErr(res, 400, 'language file text is empty');
+    if (text.length > 8 * 1024 * 1024) return sendErr(res, 400, 'language file too large (max 8MB)');
+    fs.mkdirSync(LANGS_DIR, { recursive: true });
+    fs.writeFileSync(path.join(LANGS_DIR, file), text, 'utf8');
+    const entries = text.split(/\r?\n/).filter(l => l.trim() && !l.trim().startsWith('#')).length;
+    return send(res, 200, { ok: true, name: file.slice(0, -4), entries });
+  }
+  if (route === '/api/langs' && req.method === 'DELETE') {
+    const file = langFileName(url.searchParams.get('name'));
+    if (!file) return sendErr(res, 400, 'name required');
+    const abs = normalizeInside(LANGS_DIR, file);
+    if (!abs || !fs.existsSync(abs)) return sendErr(res, 404, 'no such language file');
+    fs.unlinkSync(abs);
+    return send(res, 200, { ok: true });
   }
   if (route === '/api/icon' && req.method === 'GET') {
     // pure lookup + sendFile: the index (and fuzzy cache) is built once per scan

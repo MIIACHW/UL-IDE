@@ -105,7 +105,7 @@ export function createGraph(container, tree, hooks) {
     }
     if (state.search) {
       const q = state.search.toLowerCase();
-      const hay = `${n.id} ${n.display || ''} ${n.displayEn || ''} ${n.descKey || ''}`.toLowerCase();
+      const hay = `${n.id} ${n.display || ''} ${n.displayEn || ''} ${n.descKey || ''} ${hooks.searchText ? hooks.searchText(n) : ''}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;

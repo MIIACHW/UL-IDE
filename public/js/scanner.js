@@ -22,6 +22,7 @@ export async function scanWorkspace(scanResult, log = () => {}, { includeProgres
     scannedAt: new Date().toISOString(),
     sourceFiles: [],         // [{mod, modRoot, path, role, text, bom, sha1}]
     localizationFiles: [],   // [{mod, path, lang, text, bom}]
+    customLangs: [],         // [{name, path, text, bom}] — user-added search languages (langs/*.txt)
     nameIndex: scanResult.nameIndex || { items: [], blocks: [], recipes: [] },
     customDictionary: scanResult.customDictionary || null,
     vanilla: {},
@@ -44,6 +45,12 @@ export async function scanWorkspace(scanResult, log = () => {}, { includeProgres
     bundle.localizationFiles.push(lf);
   }
   log(`本地化文件: ${bundle.localizationFiles.length} 个`);
+
+  // 2b. user-added language files — extra search languages (see parser.searchLangText)
+  for (const cl of scanResult.customLangs || []) {
+    bundle.customLangs.push(cl);
+  }
+  if (bundle.customLangs.length) log(`自定义语言文件: ${bundle.customLangs.map(c => c.name).join(', ')}`);
 
   // 3. vanilla reference (read-only): base Localization.txt for key fallback
   try {

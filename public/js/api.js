@@ -18,3 +18,8 @@ export function apiBackup(modRoot, files) {
 export function apiExport(modRoot, files) {
   return j('/api/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ modRoot, files, confirm: true }) });
 }
+export function apiLangs() { return j('/api/langs'); }
+export function apiAddLang(name, text) {
+  return j('/api/langs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, text }) });
+}
+export function apiDeleteLang(name) { return j('/api/langs?name=' + encodeURIComponent(name), { method: 'DELETE' }); }

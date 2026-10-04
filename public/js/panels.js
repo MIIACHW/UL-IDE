@@ -26,6 +26,11 @@ export function createLeftPanel(container, ctx) {
       <div class="lp-block"><div class="lp-title">边类型</div>
         ${[['parent', '层级 parent'], ['requires', '额外前置 requires']].map(([t, label]) => `<label class="lp-check"><input type="checkbox" data-edge="${t}" checked> ${label}</label>`).join('')}
       </div>
+      <div class="lp-block"><div class="lp-title">语言文件（多语言搜索）</div>
+        ${[...(tree.localization?.langs || new Map())].map(([name, m]) =>
+          `<div class="lp-check"><span> ${esc(name)} <span class="cnt">${m.size} 条</span></span> <button class="mini danger" data-lang-del="${esc(name)}" title="删除该语言文件">✕</button></div>`).join('')}
+        <button class="mini" id="lp-addlang" title="选择一个 Key,译文 格式的 .txt 文件，确认后其译文可用于搜索与名称联想">＋ 添加语言文件</button>
+      </div>
       <div class="lp-block"><label class="lp-check"><input type="checkbox" data-flag="onlyProblems"> 只显示有问题的节点</label></div>
     `;
     const search = container.querySelector('input[type=search]');
@@ -57,6 +62,16 @@ export function createLeftPanel(container, ctx) {
       ctx.graph.render();
       ctx.graph.fitView({ minScale: 0.45 });
     });
+    container.querySelector('#lp-addlang')?.addEventListener('click', () => {
+      const fi = document.createElement('input');
+      fi.type = 'file';
+      fi.accept = '.txt,text/plain';
+      fi.onchange = () => ctx.addLanguageFile?.(fi.files[0]);
+      fi.click();
+    });
+    container.querySelectorAll('[data-lang-del]').forEach(b => b.addEventListener('click', () => {
+      ctx.removeLanguageFile?.(b.dataset.langDel);
+    }));
   }
   return { render };
 }

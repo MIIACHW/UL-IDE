@@ -66,7 +66,7 @@ export function createInspector(container, ctx) {
     }
   }
 
-  // Chinese-aware suggestion dropdown for key inputs.
+  // Chinese-aware (plus any user-added language file) suggestion dropdown for key inputs.
   function attachZhSuggest(input, tree) {
     let box = null;
     const close = () => { box?.remove(); box = null; };
@@ -80,19 +80,43 @@ export function createInspector(container, ctx) {
       close();
       const ql = q.trim().toLowerCase();
       if (!ql) return;
-      const matches = tree.nodes
-        .filter(n => (n.display || '').toLowerCase().includes(ql) || n.id.toLowerCase().includes(ql) || (n.displayEn || '').toLowerCase().includes(ql))
-        .slice(0, 8);
-      if (!matches.length) return;
+      const rows = tree.nodes
+        .filter(n => {
+          const hay = `${(n.display || '').toLowerCase()} ${n.id.toLowerCase()} ${(n.displayEn || '').toLowerCase()} ${(ctx.searchLangText ? ctx.searchLangText(n) : '').toLowerCase()}`;
+          return hay.includes(ql);
+        })
+        .slice(0, 8)
+        .map(n => {
+          const langHit = ctx.findLangMatch ? ctx.findLangMatch(n, ql) : null;
+          return { id: n.id, main: n.display || n.id, sub: (langHit ? langHit + ' · ' : '') + n.id };
+        });
+      // direct key hits from custom language files — a translation of an item/block/
+      // recipe key or a node id; committing such a row fills in the key itself
+      const langs = tree.localization?.langs;
+      if (langs && rows.length < 8) {
+        outer:
+        for (const [lang, map] of langs) {
+          for (const [key, v] of map) {
+            if (rows.some(r => r.id === key)) continue;
+            if (v && v.toLowerCase().includes(ql) &&
+                (tree.byId.has(key) || tree.nameIndex.items.has(key) || tree.nameIndex.blocks.has(key) || tree.nameIndex.recipes.has(key))) {
+              const disp = resolveKey(tree, key) || resolveKey(tree, key, 'en') || key;
+              rows.push({ id: key, main: disp, sub: `${lang}: ${v} · ${key}` });
+              if (rows.length >= 8) break outer;
+            }
+          }
+        }
+      }
+      if (!rows.length) return;
       const rect = input.getBoundingClientRect();
       box = h(`<div class="zh-suggest"></div>`);
       box.style.left = rect.left + 'px';
       box.style.top = rect.bottom + 2 + 'px';
       box.style.width = Math.max(rect.width, 260) + 'px';
-      for (const n of matches) {
-        const row = h(`<div class="zh-suggest-row"><span>${esc(n.display || n.id)}</span><span class="dim">${esc(n.id)}</span></div>`);
-        row.addEventListener('mousedown', (ev) => { ev.preventDefault(); commit(n); });
-        box.appendChild(row);
+      for (const row of rows) {
+        const el = h(`<div class="zh-suggest-row"><span>${esc(row.main)}</span><span class="dim">${esc(row.sub)}</span></div>`);
+        el.addEventListener('mousedown', (ev) => { ev.preventDefault(); commit(row); });
+        box.appendChild(el);
       }
       const onKey = (ev) => {
         if (ev.key === 'Enter') { ev.preventDefault(); commit(matches[0]); cleanup(); }

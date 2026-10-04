@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseXML, serializeXML, setAttr, makeElement, appendElement, insertElementBefore, removeElement } from '../public/js/xmldom.js';
-import { buildTechTree, parseModLocalization, parseVanillaLocalization, resolveKey } from '../public/js/parser.js';
+import { buildTechTree, parseModLocalization, parseVanillaLocalization, resolveKey, searchLangText, findLangMatch } from '../public/js/parser.js';
 import { classifyXml } from '../public/js/scanner.js';
 import { validate } from '../public/js/validator.js';
 import { generateFiles, isDirty, getGenerateFilesCalls } from '../public/js/generator.js';
@@ -161,6 +161,22 @@ test('parse: localization resolution (mod overrides vanilla)', () => {
 test('parse: branch labels localized', () => {
   const sci = tree.categories.find(c => c.id === 'Science');
   eq(sci.label, '科学与工程', 'Science branch label');
+});
+test('parser: custom language files power multi-language search', () => {
+  // langs/*.txt enter tree.localization.langs for SEARCH only — zh/en display untouched
+  const base = buildTechTree(makeBundle());
+  const b = makeBundle();
+  b.customLangs = [{ name: 'Japanese', path: 'langs/Japanese.txt', bom: null, text: 'researchTier1,リサーチ Tier 1\nperkDeadEyeName,デッドアイ' }];
+  const t = buildTechTree(b);
+  const jp = t.localization.langs.get('Japanese');
+  assert(jp instanceof Map, 'custom lang map stored');
+  eq(jp.get('researchTier1'), 'リサーチ Tier 1', 'two-column CSV parsed');
+  const node = t.byId.get('researchTier1');
+  assert(searchLangText(t, node).includes('リサーチ'), 'search corpus includes translation');
+  assert(findLangMatch(t, node, 'リサーチ').includes('Japanese'), 'lang match names the language');
+  assert(!findLangMatch(t, node, '存在しない'), 'no match for absent text');
+  eq(resolveKey(t, 'researchTier1'), resolveKey(base, 'researchTier1'), 'zh display resolution untouched');
+  eq(resolveKey(t, 'researchTier1', 'en'), resolveKey(base, 'researchTier1', 'en'), 'en display resolution untouched');
 });
 
 // ------------------------------------------------------------------ validator

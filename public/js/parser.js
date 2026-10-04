@@ -74,6 +74,43 @@ export function resolveKey(tree, key, lang = 'zh') {
   return loc.en.get(key) ?? null;
 }
 
+// Translations from user-added language files (tree.localization.langs) for a node's
+// localization keys and its unlock targets — the multi-language search corpus for the
+// graph filter and the name suggestion dropdown. Never used for display names.
+export function searchLangText(tree, node) {
+  const langs = tree.localization?.langs;
+  if (!langs || !langs.size || !node) return '';
+  let out = '';
+  for (const map of langs.values()) {
+    for (const k of [node.id, node.nameKey, node.descKey]) {
+      if (!k) continue;
+      const v = map.get(k);
+      if (v) out += ' ' + v;
+    }
+    for (const u of node.research?.unlocks || []) {
+      if (!u.name) continue;
+      const v = map.get(u.name);
+      if (v) out += ' ' + v;
+    }
+  }
+  return out;
+}
+
+// First custom-language translation of a node containing the (lowercased) query —
+// lets the suggestion UI show WHICH language matched and with what value.
+export function findLangMatch(tree, node, queryLower) {
+  const langs = tree.localization?.langs;
+  if (!langs || !langs.size || !node || !queryLower) return null;
+  for (const [lang, map] of langs) {
+    for (const k of [node.id, node.nameKey, node.descKey]) {
+      if (!k) continue;
+      const v = map.get(k);
+      if (v && v.toLowerCase().includes(queryLower)) return `${lang}: ${v}`;
+    }
+  }
+  return null;
+}
+
 const RESEARCH_BRANCH_ZH = {
   Research: '研究站', Science: '科学与工程', Tools: '工具', General: '通用',
   Melee: '近战武器', Ranged: '远程武器', Cooking: '烹饪', Farming: '种植',
@@ -241,6 +278,13 @@ export function buildTechTree(bundle) {
   if (bundle.customDictionary?.text) {
     const m = parseModLocalization(bundle.customDictionary.text);
     for (const [k, val] of m) tree.localization.zh.set(k, val);
+  }
+  // user-added language files (TechTreeIDE/langs/*.txt) — search-only languages
+  tree.localization.langs = new Map();
+  for (const cl of bundle.customLangs || []) {
+    const m = parseModLocalization(cl.text);
+    tree.localization.langs.set(cl.name, m);
+    tree.localization.languages.push({ lang: cl.name, path: cl.path || ('langs/' + cl.name + '.txt'), size: m.size, bom: cl.bom, custom: true });
   }
 
   // icons

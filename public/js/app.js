@@ -1,9 +1,9 @@
 // App bootstrap — wires scanner → parser → model → graph → inspector → panels → exporter.
 // Multi-mod: the server scans every mod in the Mods folder and classifies tech-tree
 // XMLs; dropped XML files are parsed client-side as additional in-memory sources.
-import { apiDefaults, apiScan } from './api.js';
+import { apiDefaults, apiScan, apiAddLang, apiDeleteLang } from './api.js';
 import { scanWorkspace, classifyXml } from './scanner.js';
-import { buildTechTree } from './parser.js';
+import { buildTechTree, searchLangText, findLangMatch } from './parser.js';
 import { CommandStack } from './model.js';
 import { createGraph } from './graph.js';
 import { createInspector } from './inspector.js';
@@ -196,6 +196,7 @@ function initPanels() {
   ui.center.textContent = '';
   graph = createGraph(ui.center, tree, {
     get filter() { return ctx.filter; }, // live reference — panels replace the object after init
+    searchText: (n) => searchLangText(tree, n), // multi-language search corpus (langs/*.txt)
     onSelectionChange: ({ nodes, edge }) => {
       if (nodes && nodes.length >= 1) inspector.show(nodes[0]);
       updateStatus();
@@ -210,6 +211,8 @@ function initPanels() {
   inspector = createInspector(ui.right, {
     tree, cmd, onDirty,
     showXml,
+    searchLangText: (n) => searchLangText(tree, n),
+    findLangMatch: (n, ql) => findLangMatch(tree, n, ql),
     onError: (m) => toast(m, 'error'),
   });
   inspector.show(null);
@@ -226,6 +229,36 @@ function initPanels() {
     if (dirty && !confirm('重新加载将丢弃未导出的修改。继续?')) { leftPanel.render(); return; }
     includeProgression = v;
     loadWorkspace(null, window.__lastScan);
+  };
+  // user-added language files (server persists them under langs/) — after adding or
+  // removing one, re-scan so the new language enters the search corpus
+  async function rescanWorkspace() {
+    const scan = await apiDefaults();
+    if (!scan.ok) { toast(scan.error || '重新扫描失败', 'error'); return false; }
+    window.__lastScan = scan;
+    return loadWorkspace(scan.modsDir, scan);
+  }
+  ctx.addLanguageFile = async (file) => {
+    if (!file) return;
+    const text = await file.text();
+    const name = file.name.replace(/\.txt$/i, '');
+    const entries = text.split(/\r?\n/).filter(l => l.trim() && !l.trim().startsWith('#')).length;
+    if (!entries) { toast('语言文件为空或无法解析（需要 Key,译文 两列 CSV，UTF-8）', 'error'); return; }
+    if (dirty && !confirm('添加语言文件将重新加载工作区，未导出的修改会丢失。继续?')) return;
+    try {
+      const r = await apiAddLang(name, text);
+      toast(`已添加语言文件 ${r.name}（${r.entries} 条）—— 搜索与名称联想现在支持该语言`, 'ok');
+      await rescanWorkspace();
+    } catch (e) { toast('添加语言文件失败: ' + e.message, 'error'); }
+  };
+  ctx.removeLanguageFile = async (name) => {
+    if (!confirm(`删除语言文件 "${name}"？该语言的译文将不再参与搜索。`)) return;
+    if (dirty && !confirm('重新加载将丢弃未导出的修改。继续?')) return;
+    try {
+      await apiDeleteLang(name);
+      toast(`已删除语言文件 ${name}`, 'ok');
+      await rescanWorkspace();
+    } catch (e) { toast('删除语言文件失败: ' + e.message, 'error'); }
   };
   exporter = createExporter({
     tree, modsDir: ctx.modsDir,
