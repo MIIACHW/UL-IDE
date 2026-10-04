@@ -14,6 +14,8 @@ export function createLeftPanel(container, ctx) {
 
   function render() {
     const tree = ctx.tree;
+    let curNameLang = '';
+    try { curNameLang = localStorage.getItem('ul-ide-display-lang') || ''; } catch { /* default */ }
     const modsPresent = [...new Set(tree.nodes.map(n => n.sourceMod))];
     container.innerHTML = `
       <div class="lp-search"><input type="search" placeholder="${esc(t('left.searchPh'))}"></div>
@@ -30,6 +32,13 @@ export function createLeftPanel(container, ctx) {
       <div class="lp-block"><div class="lp-title">${esc(t('left.langTitle'))}</div>
         ${[...(tree.localization?.langs || new Map())].map(([name, m]) =>
           `<div class="lp-check"><span> ${esc(name)} <span class="cnt">${esc(t('left.langEntries', { n: m.size }))}</span></span> <button class="mini danger" data-lang-del="${esc(name)}" title="${esc(t('left.langDelTitle'))}">✕</button></div>`).join('')}
+        <div class="lp-check"><span>${esc(t('left.nameLang'))}</span>
+          <select id="lp-namelang" title="${esc(t('left.nameLangTitle'))}">
+            <option value="" ${curNameLang === '' ? 'selected' : ''}>${esc(t('left.nameLangAuto'))}</option>
+            <option value="en" ${curNameLang === 'en' ? 'selected' : ''}>English</option>
+            ${[...(tree.localization?.langs || new Map())].map(([name]) => `<option value="${esc(name)}" ${curNameLang === name ? 'selected' : ''}>${esc(name)}</option>`).join('')}
+          </select>
+        </div>
         <button class="mini" id="lp-addlang" title="${esc(t('left.addLangTitle'))}">${esc(t('left.addLang'))}</button>
       </div>
       <div class="lp-block"><label class="lp-check"><input type="checkbox" data-flag="onlyProblems"> ${esc(t('left.onlyProblems'))}</label></div>
@@ -73,6 +82,9 @@ export function createLeftPanel(container, ctx) {
     container.querySelectorAll('[data-lang-del]').forEach(b => b.addEventListener('click', () => {
       ctx.removeLanguageFile?.(b.dataset.langDel);
     }));
+    container.querySelector('#lp-namelang')?.addEventListener('change', (ev) => {
+      ctx.changeDisplayLang?.(ev.target.value);
+    });
   }
   return { render };
 }

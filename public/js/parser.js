@@ -111,6 +111,25 @@ export function findLangMatch(tree, node, queryLower) {
   return null;
 }
 
+// Node display names: with displayLang set ('en' or a custom langs/ file name), that
+// language's translation wins; anything else falls back to the default zh→en→key chain.
+// Called after buildTechTree and whenever the user changes the name-language selector —
+// pure model update, no XML touched. displayEn always reflects the English column.
+export function applyDisplayNames(tree, displayLang = '') {
+  const langs = tree.localization?.langs;
+  for (const n of tree.nodes) {
+    const key = n.kind === 'research' ? n.id : (n.nameKey && n.nameKey !== 'null' ? n.nameKey : n.id);
+    let v = null;
+    if (displayLang && displayLang !== 'auto') {
+      if (displayLang === 'en') v = tree.localization.en.get(key) ?? null;
+      else v = langs?.get(displayLang)?.get(key) ?? null;
+    }
+    if (v == null) v = resolveKey(tree, key) || resolveKey(tree, key, 'en') || n.id;
+    n.display = v;
+    n.displayEn = tree.localization.en.get(key) || null;
+  }
+}
+
 const RESEARCH_BRANCH_ZH = {
   Research: '研究站', Science: '科学与工程', Tools: '工具', General: '通用',
   Melee: '近战武器', Ranged: '远程武器', Cooking: '烹饪', Farming: '种植',

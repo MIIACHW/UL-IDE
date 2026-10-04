@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseXML, serializeXML, setAttr, makeElement, appendElement, insertElementBefore, removeElement } from '../public/js/xmldom.js';
-import { buildTechTree, parseModLocalization, parseVanillaLocalization, resolveKey, searchLangText, findLangMatch } from '../public/js/parser.js';
+import { buildTechTree, parseModLocalization, parseVanillaLocalization, resolveKey, searchLangText, findLangMatch, applyDisplayNames } from '../public/js/parser.js';
 import { classifyXml } from '../public/js/scanner.js';
 import { validate } from '../public/js/validator.js';
 import { generateFiles, isDirty, getGenerateFilesCalls } from '../public/js/generator.js';
@@ -177,6 +177,22 @@ test('parser: custom language files power multi-language search', () => {
   assert(!findLangMatch(t, node, '存在しない'), 'no match for absent text');
   eq(resolveKey(t, 'researchTier1'), resolveKey(base, 'researchTier1'), 'zh display resolution untouched');
   eq(resolveKey(t, 'researchTier1', 'en'), resolveKey(base, 'researchTier1', 'en'), 'en display resolution untouched');
+  // node display names can follow a chosen language (custom file or English)
+  const node2 = t.byId.get('researchTier1');
+  const autoDisplay = node2.display;
+  applyDisplayNames(t, 'Japanese');
+  eq(node2.display, 'リサーチ Tier 1', 'display follows the custom language');
+  applyDisplayNames(t, '');
+  eq(node2.display, autoDisplay, 'auto restores the default chain');
+  const perk = t.byId.get('perkDeadEye');
+  const enDisplay = perk.displayEn;
+  applyDisplayNames(t, 'en');
+  eq(perk.display, enDisplay, 'English chosen uses the en column');
+  applyDisplayNames(t, '');
+  // missing translations fall back to the default chain
+  applyDisplayNames(t, 'Japanese');
+  const untranslated = [...t.byId.values()].find(n => !t.localization.langs.get('Japanese').has(n.id) && n.kind === 'research');
+  if (untranslated) assert(untranslated.display === untranslated.id || untranslated.display === resolveKey(t, untranslated.id) || untranslated.display === resolveKey(t, untranslated.id, 'en'), 'fallback chain for untranslated nodes');
 });
 
 // ------------------------------------------------------------------ validator

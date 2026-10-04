@@ -623,6 +623,16 @@ export function createGraph(container, tree, hooks) {
     },
     // called after model edits — incremental sync, no XML serialization, no full clear
     syncModel,
+    // re-set label/title text for every cached node (display-language switch)
+    relabelAll() {
+      for (const [id, e] of nodeEls) {
+        const n = tree.byId.get(id);
+        if (!n) continue;
+        const display = n.display || n.id;
+        e.label.textContent = display.length > 13 ? display.slice(0, 12) + '…' : display;
+        e.titleEl.textContent = `${display}  [${n.id}]`;
+      }
+    },
     // single-node content refresh (icon/id/display/root) — no layout, no edge rebuild
     updateNodeContent,
     // edge reconcile only (used after renames re-key edges without layout changes)

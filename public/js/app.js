@@ -3,7 +3,7 @@
 // XMLs; dropped XML files are parsed client-side as additional in-memory sources.
 import { apiDefaults, apiScan, apiAddLang, apiDeleteLang } from './api.js';
 import { scanWorkspace, classifyXml } from './scanner.js';
-import { buildTechTree, searchLangText, findLangMatch } from './parser.js';
+import { buildTechTree, searchLangText, findLangMatch, applyDisplayNames } from './parser.js';
 import { CommandStack } from './model.js';
 import { createGraph } from './graph.js';
 import { createInspector } from './inspector.js';
@@ -92,6 +92,14 @@ function refreshLangButton() {
   if (b) b.textContent = getLang() === 'zh' ? 'EN' : '中文';
 }
 
+// Node-name display language: '' = auto (zh → en), 'en', or a custom langs/ file name.
+function displayLang() {
+  try { return localStorage.getItem('ul-ide-display-lang') || ''; } catch { return ''; }
+}
+function setDisplayLang(l) {
+  try { localStorage.setItem('ul-ide-display-lang', l || ''); } catch { /* private mode */ }
+}
+
 function updateStatus(extra = '') {
   if (!tree) { ui.status.textContent = t('status.unloaded'); return; }
   // uses the dirty cache — selecting/panning/zooming never serializes XML here
@@ -142,6 +150,7 @@ async function loadWorkspace(modsDirArg, scanResult) {
   for (const w of bundle.warnings) console.warn('[scan] ' + w);
   tree = buildTechTree(bundle);
   tree.mods = bundle.mods;
+  applyDisplayNames(tree, displayLang()); // chosen node-name language (default zh→en)
 
   // reset UI state
   commands.undoStack.length = 0; commands.redoStack.length = 0;
@@ -266,6 +275,13 @@ function initPanels() {
       toast(t('toast.langDeleted', { name }), 'ok');
       await rescanWorkspace();
     } catch (e) { toast(t('toast.langDelFailed', { msg: e.message }), 'error'); }
+  };
+  // node-name display language — pure model/label update, no reload needed
+  ctx.changeDisplayLang = (lang) => {
+    setDisplayLang(lang);
+    applyDisplayNames(tree, lang);
+    graph.relabelAll();
+    inspector.refresh();
   };
   // UI language toggle — static chrome + all dynamically rendered panels
   $('#btnLang').onclick = () => {
