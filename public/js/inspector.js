@@ -24,27 +24,31 @@ export function createInspector(container, ctx) {
     parent.appendChild(s);
     return s;
   }
+  // commit pipeline shared by all text inputs: typing (input) → debounced change;
+  // Enter commits immediately; change handlers dedupe repeats (Enter then blur once).
+  // Chromium does not fire a native change on Enter — without this, edits sit in the
+  // input until a blur happens (or never commit visibly).
+  function attachCommit(el) {
+    const orig = el.addEventListener.bind(el);
+    el.addEventListener = (type, fn, opts) => {
+      if (type === 'change') {
+        let last = el.value;
+        orig(type, () => { if (el.value !== last) { last = el.value; fn(); } });
+      } else orig(type, fn, opts);
+    };
+    el.addEventListener('input', () => {
+      clearTimeout(el._commitTimer);
+      el._commitTimer = setTimeout(() => el.dispatchEvent(new Event('change')), 450);
+    });
+    el.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { clearTimeout(el._commitTimer); el.dispatchEvent(new Event('change')); }
+    });
+  }
   function fieldRow(parent, label, inputHtml) {
     const r = h(`<div class="insp-row"><label>${esc(label)}</label><div class="insp-field">${inputHtml}</div></div>`);
     parent.appendChild(r);
     const el = r.querySelector('input, select, textarea');
-    if (el) {
-      // commit pipeline: typing (input) → debounced change; change handlers dedupe repeats.
-      const orig = el.addEventListener.bind(el);
-      el.addEventListener = (type, fn, opts) => {
-        if (type === 'change') {
-          let last = el.value;
-          orig(type, () => { if (el.value !== last) { last = el.value; fn(); } });
-        } else orig(type, fn, opts);
-      };
-      el.addEventListener('input', () => {
-        clearTimeout(el._commitTimer);
-        el._commitTimer = setTimeout(() => el.dispatchEvent(new Event('change')), 450);
-      });
-      el.addEventListener('keydown', (ev) => {
-        if (ev.key === 'Enter') { clearTimeout(el._commitTimer); el.dispatchEvent(new Event('change')); }
-      });
-    }
+    if (el) attachCommit(el);
     return el;
   }
   const bindField = (parent, label, html, apply) => {
@@ -156,8 +160,14 @@ export function createInspector(container, ctx) {
       const v = input.value.trim();
       if (!v || v === n.id) { render(); return; }
       if (tree.byId.has(v)) { ctx.onError(`ID "${v}" 已存在`); render(); return; }
+      const prevId = n.id;
       ctx.cmd(() => cmdRename(tree, n, v));
-      ctx.onDirty();
+      // research display names key off the node id itself — refresh after rename
+      if (n.kind === 'research') {
+        n.display = resolveKey(tree, v) || resolveKey(tree, v, 'en') || v;
+        n.displayEn = tree.localization.en.get(v) || null;
+      }
+      ctx.onDirty({ type: 'content', node: n, prevId });
     });
     const zhName = resolveKey(tree, n.id);
     const enName = n.displayEn;
@@ -177,7 +187,7 @@ export function createInspector(container, ctx) {
       s1.appendChild(h(`<div class="insp-hint ${descResolved == null ? 'warn' : ''}">${descResolved == null ? '⚠ 未找到' : esc(descResolved)}</div>`));
     }
     input = fieldRow(s1, '图标 icon（符号）', `<input type="text" value="${esc(n.icon || '')}">`);
-    input.addEventListener('change', () => { ctx.cmd(() => cmdSetAttr(tree, n, 'icon', input.value || undefined)); ctx.onDirty(); });
+    input.addEventListener('change', () => { ctx.cmd(() => cmdSetAttr(tree, n, 'icon', input.value || undefined)); ctx.onDirty({ type: 'content', node: n }); });
 
     const r = n.research;
     const sr = section(c, '研究设置');
@@ -257,7 +267,11 @@ export function createInspector(container, ctx) {
         ctx.cmd(() => cmdSetDomAttr(tree, ing.dom, 'name', nameInp.value, 'Set ingredient.name', n));
         ctx.onDirty();
       });
-      cntInp.addEventListener('change', () => { ctx.cmd(() => cmdSetDomAttr(tree, ing.dom, 'count', cntInp.value || undefined)); ctx.onDirty(); });
+      attachCommit(cntInp);
+      // node MUST be passed: cmdSetDomAttr relies on it to reparseResearch(node) —
+      // without it the DOM attr updates but r.ingredients stays stale and the
+      // inspector re-renders the input with the old count
+      cntInp.addEventListener('change', () => { ctx.cmd(() => cmdSetDomAttr(tree, ing.dom, 'count', cntInp.value || undefined, 'Set ingredient.count', n)); ctx.onDirty(); });
       row.querySelector('button').addEventListener('click', () => { ctx.cmd(() => cmdRemoveResearchChild(tree, n, ing.dom)); ctx.onDirty(); });
     }
     si.querySelector('[data-act="add-ing"]')?.addEventListener('click', () => {
@@ -282,7 +296,7 @@ export function createInspector(container, ctx) {
       s1.appendChild(h(`<div class="insp-hint ${dResolved == null ? 'warn' : ''}">${dResolved == null ? '⚠ 未找到' : esc(dResolved)}</div>`));
     }
     input = fieldRow(s1, '图标 icon', `<input type="text" value="${esc(n.icon || '')}">`);
-    input.addEventListener('change', () => { ctx.cmd(() => cmdSetAttr(tree, n, 'icon', input.value || undefined)); ctx.onDirty(); });
+    input.addEventListener('change', () => { ctx.cmd(() => cmdSetAttr(tree, n, 'icon', input.value || undefined)); ctx.onDirty({ type: 'content', node: n }); });
 
     const sp = section(c, '等级与消耗');
     bindField(sp, 'min_level', `<input type="number" step="1" value="${n.minLevel ?? ''}">`,

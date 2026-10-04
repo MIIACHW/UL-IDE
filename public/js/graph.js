@@ -42,6 +42,7 @@ export function createGraph(container, tree, hooks) {
 
   const nodeEls = new Map();  // nodeId -> {g, rect, img, label, marker, root, R}
   const edgeEls = new Map();  // edgeId -> {el, edge}
+  const nodeEdges = new Map(); // nodeId -> Set<edgeId> (edges currently in edgeEls) — drag hits only these
   let oldProblemNodes = new Map();
   let researchNodes = [];     // isolated research data — other kinds never enter
 
@@ -179,20 +180,11 @@ export function createGraph(container, tree, hooks) {
       fill: '#23272e', stroke: p.root ? '#8a97a5' : '#4c5763', 'stroke-width': 1.3,
     }, g);
     const img = el('image', { x: -R + 7, y: -R + 7, width: R * 2 - 14, height: R * 2 - 14, href: PLACEHOLDER_ICON }, g);
-    // icon fallback chain; the browser caches each URL, the DOM cache prevents re-request
-    const candidates = iconCandidates(n);
-    let ci = 0;
-    const tryNext = () => {
-      if (ci >= candidates.length) { img.setAttribute('href', PLACEHOLDER_ICON); return; }
-      const c = candidates[ci++];
-      if (c.svg) { img.setAttribute('href', c.svg); return; }
-      let url = '/api/icon?name=' + encodeURIComponent(c.name);
-      if (c.fuzzy) url += '&fuzzy=' + encodeURIComponent(c.fuzzy);
-      img.setAttribute('href', url);
-    };
-    img.addEventListener('error', tryNext);
-    tryNext();
-    stats.iconRequests++;
+    // icon fallback chain; the browser caches each URL, the DOM cache prevents re-request.
+    // One persistent error listener reads img._iconState so updateNodeContent() can swap
+    // in a fresh candidate chain without re-binding — superseded chains are ignored.
+    img.addEventListener('error', () => { const st = img._iconState; if (st) advanceIcon(img, st); });
+    applyIcon(n, img);
     const label = el('text', { x: 0, y: R + 13, 'text-anchor': 'middle', fill: '#aeb6c2', 'font-size': 10.5 }, g);
     const display = n.display || n.id;
     label.textContent = display.length > 13 ? display.slice(0, 12) + '…' : display;
@@ -200,9 +192,25 @@ export function createGraph(container, tree, hooks) {
     title.textContent = `${display}  [${n.id}]`;
     g.addEventListener('mousedown', (ev) => startNodeDrag(n, ev));
     g.addEventListener('dblclick', (ev) => { ev.stopPropagation(); hooks.onInspect(n); });
-    const entry = { g, rect, img, label, marker: null, root: !!p.root, R };
+    const entry = { g, rect, img, label, titleEl: title, marker: null, root: !!p.root, R };
     nodeEls.set(n.id, entry);
     return entry;
+  }
+
+  function advanceIcon(img, st) {
+    if (img._iconState !== st) return; // stale error from a superseded candidate chain
+    if (st.ci >= st.candidates.length) { img.setAttribute('href', PLACEHOLDER_ICON); return; }
+    const c = st.candidates[st.ci++];
+    if (c.svg) { img.setAttribute('href', c.svg); return; }
+    let url = '/api/icon?name=' + encodeURIComponent(c.name);
+    if (c.fuzzy) url += '&fuzzy=' + encodeURIComponent(c.fuzzy);
+    img.setAttribute('href', url);
+  }
+
+  function applyIcon(n, img) {
+    img._iconState = { candidates: iconCandidates(n), ci: 0 };
+    advanceIcon(img, img._iconState);
+    stats.iconRequests++;
   }
 
   function applyNodeVisual(n) {
@@ -233,12 +241,60 @@ export function createGraph(container, tree, hooks) {
     e.marker = el('circle', { cx: e.R - 6, cy: -e.R + 6, r: 4.5, fill }, e.g);
   }
 
+  // Root ↔ child transition in place: resize/retint the affected node only
+  // (R, rect, image frame, label offset, marker position). Never rebuilds the graph.
+  function applyRootVisual(n) {
+    const e = nodeEls.get(n.id);
+    const p = state.nodePos.get(n.id);
+    if (!e || !p || !!p.root === e.root) return;
+    const R = p.root ? 30 : 26;
+    e.root = !!p.root;
+    e.R = R;
+    e.rect.setAttribute('x', -R); e.rect.setAttribute('y', -R);
+    e.rect.setAttribute('width', R * 2); e.rect.setAttribute('height', R * 2);
+    e.img.setAttribute('x', -R + 7); e.img.setAttribute('y', -R + 7);
+    e.img.setAttribute('width', R * 2 - 14); e.img.setAttribute('height', R * 2 - 14);
+    e.label.setAttribute('y', R + 13);
+    if (e.marker) { e.marker.setAttribute('cx', R - 6); e.marker.setAttribute('cy', -R + 6); }
+    applyNodeVisual(n); // stroke color/width follow root state + selection
+  }
+
+  // Inspector-driven content edit (icon / id / display name): touch ONLY this node's
+  // DOM. prevId re-keys the caches after a rename; callers sync edges separately.
+  function updateNodeContent(n, prevId) {
+    if (prevId && prevId !== n.id) {
+      for (const cache of [nodeEls, state.nodePos, nodeEdges]) {
+        if (cache.has(prevId)) { cache.set(n.id, cache.get(prevId)); cache.delete(prevId); }
+      }
+      if (state.selected.delete(prevId)) state.selected.add(n.id);
+    }
+    const e = nodeEls.get(n.id);
+    if (!e) return; // not in the research graph (progression nodes never render here)
+    e.g.setAttribute('data-node-id', n.id);
+    applyIcon(n, e.img);
+    const display = n.display || n.id;
+    e.label.textContent = display.length > 13 ? display.slice(0, 12) + '…' : display;
+    e.titleEl.textContent = `${display}  [${n.id}]`;
+    applyRootVisual(n);
+    applyNodeVisual(n);
+  }
+
   // ---------------------------------------------------------- edges (cached)
   function edgePathD(a, b) {
     const yTop = a.y - NODE_R;
     const yBot = b.y + NODE_R;
     const railY = yBot + (yTop - yBot) / 2;
     return 'M' + [[a.x, yTop], [a.x, railY], [b.x, railY], [b.x, yBot]].map(p => p.join(',')).join(' L');
+  }
+
+  function addAdjacency(e) {
+    for (const nid of [e.from, e.to]) {
+      if (!nodeEdges.has(nid)) nodeEdges.set(nid, new Set());
+      nodeEdges.get(nid).add(e.id);
+    }
+  }
+  function removeAdjacency(e) {
+    for (const nid of [e.from, e.to]) nodeEdges.get(nid)?.delete(e.id);
   }
 
   function createEdgeEl(e) {
@@ -258,6 +314,7 @@ export function createGraph(container, tree, hooks) {
       hooks.onSelectionChange({ nodes: [], edge: e });
     });
     edgeEls.set(e.id, { el: path, edge: e });
+    addAdjacency(e);
   }
 
   // ---------------------------------------------------------- incremental ops
@@ -297,13 +354,16 @@ export function createGraph(container, tree, hooks) {
     oldProblemNodes = new Map(newMap);
   }
 
-  // Single node position: transform + the edges connected to it.
+  // Single node position: transform + only the edges connected to it (adjacency cache).
   function updateNodePosition(nodeId) {
     const e = nodeEls.get(nodeId);
     const p = state.nodePos.get(nodeId);
     if (e && p) e.g.setAttribute('transform', `translate(${p.x},${p.y})`);
-    for (const [id, ee] of edgeEls) {
-      if (ee.edge.from !== nodeId && ee.edge.to !== nodeId) continue;
+    const incident = nodeEdges.get(nodeId);
+    if (!incident) return;
+    for (const id of incident) {
+      const ee = edgeEls.get(id);
+      if (!ee) continue;
       const a = state.nodePos.get(ee.edge.from), b = state.nodePos.get(ee.edge.to);
       if (a && b) ee.el.setAttribute('d', edgePathD(a, b));
     }
@@ -341,6 +401,7 @@ export function createGraph(container, tree, hooks) {
   function renderEdges() {
     gEdges.textContent = '';
     edgeEls.clear();
+    nodeEdges.clear();
     for (const e of tree.edges) {
       if (state.hiddenEdges.has(e.type)) continue;
       const a = state.nodePos.get(e.from), b = state.nodePos.get(e.to);
@@ -363,6 +424,7 @@ export function createGraph(container, tree, hooks) {
   function syncModel() {
     layoutResearch();
     renderNodes();
+    for (const n of researchNodes) applyRootVisual(n); // parent edits: root/child swap in place
     syncEdges();
     updateEdgeSelection();
     applyTransform();
@@ -377,7 +439,7 @@ export function createGraph(container, tree, hooks) {
       wanted.set(e.id, e);
     }
     for (const [id, e] of edgeEls) {
-      if (!wanted.has(id)) { e.el.remove(); edgeEls.delete(id); }
+      if (!wanted.has(id)) { e.el.remove(); edgeEls.delete(id); removeAdjacency(e.edge); }
     }
     for (const [id, e] of wanted) {
       if (!edgeEls.has(id)) createEdgeEl(e);
@@ -472,11 +534,6 @@ export function createGraph(container, tree, hooks) {
     const start = toWorld(ev.clientX, ev.clientY);
     const origins = new Map();
     for (const id of state.selected) { const p = state.nodePos.get(id); if (p) origins.set(id, { ...p }); }
-    // only edges connected to a dragged node need d updates during the move
-    const affectedEdges = [];
-    for (const [id, ee] of edgeEls) {
-      if (origins.has(ee.edge.from) || origins.has(ee.edge.to)) affectedEdges.push(ee);
-    }
     let moved = false;
     state.dragging = {
       type: 'node',
@@ -492,14 +549,15 @@ export function createGraph(container, tree, hooks) {
       },
       up() {
         if (!moved) return;
-        // write view state first, then notify (dirty) — never a full render here
+        // pure view-state change: persist layout, then notify viewDirty.
+        // Never routes through onDirty — a drag must not look like an XML edit.
         for (const id of state.selected) {
           const node = tree.byId.get(id);
           const p = state.nodePos.get(id);
           if (!node || !p) continue;
           if (node.kind === 'research') node.pos = { x: p.x, y: p.y };
         }
-        hooks.onDirty();
+        hooks.onViewDirty?.();
       },
     };
   }
@@ -565,5 +623,9 @@ export function createGraph(container, tree, hooks) {
     },
     // called after model edits — incremental sync, no XML serialization, no full clear
     syncModel,
+    // single-node content refresh (icon/id/display/root) — no layout, no edge rebuild
+    updateNodeContent,
+    // edge reconcile only (used after renames re-key edges without layout changes)
+    syncEdges,
   };
 }

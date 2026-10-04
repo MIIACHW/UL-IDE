@@ -3,7 +3,12 @@
 // Files are keyed "<ModName>/<Config-relative path>" for multi-mod export.
 import { serializeXML } from './xmldom.js';
 
+// debug metric: how often full XML serialization runs (window.__ide.debug.generateFilesCalls)
+let generateFilesCalls = 0;
+export function getGenerateFilesCalls() { return generateFilesCalls; }
+
 export function generateFiles(tree) {
+  generateFilesCalls++;
   const files = {};
   for (const sf of tree.sourceFiles) {
     let text = serializeXML(sf.dom);

@@ -32,7 +32,7 @@ export function createLeftPanel(container, ctx) {
     let deb;
     search.addEventListener('input', () => {
       clearTimeout(deb);
-      deb = setTimeout(() => { ctx.graph.setSearch(search.value.trim()); ctx.graph.render(); }, 180);
+      deb = setTimeout(() => { ctx.graph.setSearch(search.value.trim()); }, 180); // setSearch full-renders once
     });
     container.querySelectorAll('[data-cat]').forEach(cb => cb.addEventListener('change', () => {
       cb.checked ? filter.categories.add(cb.dataset.cat) : filter.categories.delete(cb.dataset.cat);
@@ -47,8 +47,7 @@ export function createLeftPanel(container, ctx) {
     }));
     container.querySelectorAll('[data-edge]').forEach(cb => cb.addEventListener('change', () => {
       if (cb.checked) filter.edgeTypes.delete(cb.dataset.edge); else filter.edgeTypes.add(cb.dataset.edge);
-      ctx.graph.setHiddenEdges(filter.edgeTypes);
-      ctx.graph.render();
+      ctx.graph.setHiddenEdges(filter.edgeTypes); // edge-only change — no node re-render needed
     }));
     container.querySelector('#lp-prog').addEventListener('change', (ev) => {
       ctx.onIncludeProgression?.(ev.target.checked);

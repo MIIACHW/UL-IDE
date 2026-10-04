@@ -106,13 +106,25 @@ export function cmdSetAttr(tree, node, name, value) {
     label: `Set ${node.id}.${name}`,
     fileKey: nodeFileKey(tree, node),
     do() {
-      if (this.prev === undefined) this.prev = getAttrSafe(node.dom, name);
+      if (this.prev === undefined) {
+        this.prev = getAttrSafe(node.dom, name);
+        // a removal drops the attr object from the list — remember it and its slot
+        // so undo can restore exact position/whitespace (byte fidelity, not re-add-at-end)
+        if (value === undefined || value === null) {
+          const a = node.dom.attrs.find(x => x.name === name);
+          if (a) { this.removedAttr = a; this.removedIdx = node.dom.attrs.indexOf(a); }
+        }
+      }
       setAttrOnDom(node.dom, name, value);
       applyNodeAttr(node, name, value);
       rebuildEdges(tree);
     },
     undo() {
-      setAttrOnDom(node.dom, name, this.prev);
+      if (this.removedAttr) {
+        node.dom.attrs.splice(Math.min(this.removedIdx, node.dom.attrs.length), 0, this.removedAttr);
+      } else {
+        setAttrOnDom(node.dom, name, this.prev);
+      }
       applyNodeAttr(node, name, this.prev);
       rebuildEdges(tree);
     },
@@ -139,13 +151,23 @@ function applyNodeAttr(node, name, value) {
 }
 
 // Rename a node id and cascade to every referencing attribute (parent + requires).
+// fileKeys reports EVERY file the cascade mutates (the node's own file plus any file
+// holding a parent/requires/progression_name reference) so dirty tracking stays exact.
 export function cmdRename(tree, node, newId) {
   const oldId = node.id;
   const affected = [];
   collectIdRefs(tree, oldId, affected);
+  const mainKey = nodeFileKey(tree, node);
+  const fileKeys = new Set();
+  if (mainKey) fileKeys.add(mainKey);
+  for (const r of affected) {
+    const k = fileKeyOf(tree, r.dom);
+    if (k) fileKeys.add(k);
+  }
   const cmd = {
     label: `Rename ${oldId} → ${newId}`,
-    fileKey: nodeFileKey(tree, node),
+    fileKey: mainKey,
+    fileKeys,
     do() {
       setAttrOnDom(node.dom, 'name', newId);
       node.id = newId;
@@ -273,13 +295,19 @@ export function cmdSetDomAttr(tree, dom, name, value, label, node) {
         const a = dom.attrs.find(x => x.name === name);
         this.hadAttr = !!a;
         this.prevVal = a ? a.decoded : undefined;
+        // same byte-fidelity rule as cmdSetAttr: keep removals reversible exactly
+        if (this.hadAttr && (value === undefined || value === null)) {
+          this.removedAttr = a; this.removedIdx = dom.attrs.indexOf(a);
+        }
       }
       setAttrOnDom(dom, name, value);
       if (node) reparseResearch(node);
       rebuildEdges(tree);
     },
     undo() {
-      if (this.hadAttr) setAttrOnDom(dom, name, this.prevVal);
+      if (this.removedAttr) {
+        dom.attrs.splice(Math.min(this.removedIdx, dom.attrs.length), 0, this.removedAttr);
+      } else if (this.hadAttr) setAttrOnDom(dom, name, this.prevVal);
       else setAttrOnDom(dom, name, undefined);
       if (node) reparseResearch(node);
       rebuildEdges(tree);

@@ -42,6 +42,14 @@ function markDirty(fileKey) {
   dirty = true;
 }
 function clearDirty() { dirtyFiles.clear(); dirty = false; }
+// view dirty — node.pos is IDE layout state (persisted to localStorage), never XML.
+// Drags set ONLY this flag; the export pipeline and the dirty status stay untouched.
+let viewDirty = false;
+function markViewDirty() {
+  viewDirty = true;
+  savePositions(); // persist layout immediately — a crash must not lose it
+  updateStatus();
+}
 // precise recompute (serialize once per file) — used by Undo/Redo, not by clicks
 function recomputeDirty() {
   window.__dirtyLog = window.__dirtyLog || [];
@@ -85,6 +93,7 @@ function updateStatus(extra = '') {
     `<b>${tree.mods?.length || 0} 个 Mod</b>` +
     ` · 节点 ${tree.nodes.length} · 边 ${tree.edges.length}` +
     ` · <span class="${dirty ? 'dirty' : 'clean'}">${dirty ? `● 有未导出修改 (${dirtyFiles.size} 文件)` : '○ 与原始文件一致'}</span>` +
+    (viewDirty ? ' · <span class="clean">布局已调整（仅视图，不写入 XML）</span>' : '') +
     ` · 选中 ${sel}` +
     (commands.canUndo ? ` · 撤销可用: ${commands.label}` : '') +
     (extra ? ` · ${extra}` : '');
@@ -113,6 +122,7 @@ function runValidation(silent = false) {
 
 async function loadWorkspace(modsDirArg, scanResult) {
   clearDirty();
+  viewDirty = false; // layout state is restored from localStorage below
   let scan = scanResult;
   if (!scan) {
     toast('扫描 Mods 文件夹…');
@@ -143,17 +153,30 @@ async function loadWorkspace(modsDirArg, scanResult) {
 function cmd(factory) {
   try {
     const c = commands.push(factory());
-    if (c && c.fileKey) markDirty(c.fileKey); else markDirty(null);
+    // a command may mutate several files (e.g. rename cascades into parent/requires/
+    // progression_name attrs in other XMLs) — every touched file must be tracked
+    const keys = c && c.fileKeys instanceof Set && c.fileKeys.size
+      ? c.fileKeys
+      : (c && c.fileKey ? new Set([c.fileKey]) : null);
+    if (keys) { for (const k of keys) markDirty(k); } else markDirty(null);
     updateStatus();
   }
   catch (e) { toast('操作失败: ' + e.message, 'error'); }
 }
-function onDirty() {
+function onDirty(hint) {
   updateStatus();
   clearTimeout(onDirty._t);
   onDirty._t = setTimeout(() => runValidation(true), 400);
   inspector.refresh();
-  graph.syncModel(); // incremental DOM/edge sync — no full rebuild, no XML serialization
+  if (hint && hint.type === 'content' && hint.node) {
+    // icon/id/display edit — single node DOM refresh, edges only re-keyed on rename
+    graph.updateNodeContent(hint.node, hint.prevId);
+    if (hint.prevId) graph.syncEdges();
+  } else if (hint && hint.type === 'panel') {
+    // inspector-only change (unlocks/ingredients/…): graph DOM untouched
+  } else {
+    graph.syncModel(); // incremental DOM/edge sync — no full rebuild, no XML serialization
+  }
 }
 function locate(id) {
   const n = tree.byId.get(id);
@@ -179,6 +202,7 @@ function initPanels() {
     },
     onInspect: (n) => { inspector.show(n); },
     onDirty: () => onDirty(),
+    onViewDirty: () => markViewDirty(),
     cmd,
     onError: (m) => toast(m, 'error'),
   });
@@ -275,14 +299,15 @@ window.addEventListener('drop', async (ev) => {
 });
 
 // position persistence for dragged definition nodes (IDE view state, not XML)
-window.addEventListener('beforeunload', () => {
+function savePositions() {
   if (!tree) return;
   try {
     const pos = {};
     for (const n of tree.nodes) if (n.pos) pos[n.id] = n.pos;
     localStorage.setItem('ul-ide-pos', JSON.stringify(pos));
   } catch { /* ignore */ }
-});
+}
+window.addEventListener('beforeunload', savePositions);
 function restorePositions() {
   try {
     const pos = JSON.parse(localStorage.getItem('ul-ide-pos') || '{}');
@@ -307,6 +332,7 @@ function restorePositions() {
     get generateFilesCalls() { return getGenerateFilesCalls(); },
     get dirtyFiles() { return [...dirtyFiles]; },
     get dirty() { return dirty; },
+    get viewDirty() { return viewDirty; },
   };
   try {
     const scan = await apiDefaults();

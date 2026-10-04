@@ -163,7 +163,10 @@ function scanMods(modsDir) {
     }
   }
 
-  // icon inheritance from vanilla (read-only) + every mod's blocks/items
+  // icon inheritance from vanilla (read-only) + every mod's blocks/items.
+  // iconChain is rebuilt from scratch every scan — keeping entries across scans would
+  // leak the previous Mods directory's Extends/Icon inheritance into /api/icon.
+  for (const k of Object.keys(iconChain)) delete iconChain[k];
   scanChainsFile(path.join(VANILLA_ROOT, 'Config', 'blocks.xml'));
   scanChainsFile(path.join(VANILLA_ROOT, 'Config', 'items.xml'));
   for (const mod of mods) {

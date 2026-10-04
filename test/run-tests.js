@@ -8,9 +8,9 @@ import { parseXML, serializeXML, setAttr, makeElement, appendElement, insertElem
 import { buildTechTree, parseModLocalization, parseVanillaLocalization, resolveKey } from '../public/js/parser.js';
 import { classifyXml } from '../public/js/scanner.js';
 import { validate } from '../public/js/validator.js';
-import { generateFiles, isDirty } from '../public/js/generator.js';
+import { generateFiles, isDirty, getGenerateFilesCalls } from '../public/js/generator.js';
 import { lineDiff, structuredDiff } from '../public/js/differ.js';
-import { CommandStack, cmdSetAttr, cmdRename, cmdDeleteNode, cmdDuplicateNode, cmdAddResearchChild, cmdRemoveResearchChild, rebuildEdges } from '../public/js/model.js';
+import { CommandStack, cmdSetAttr, cmdSetDomAttr, cmdRename, cmdDeleteNode, cmdDuplicateNode, cmdAddResearchChild, cmdRemoveResearchChild, rebuildEdges } from '../public/js/model.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const MOD_ROOT = path.resolve(HERE, '..', '..', 'UndeadLegacy');
@@ -202,6 +202,44 @@ test('commands: setAttr + undo restores byte-identical file', () => {
   cs.undo();
   eq(generateFiles(t)['UndeadLegacy/Config/Custom/recipes_research.xml'], researchText, 'second undo restores bytes');
 });
+test('commands: undo of attr removal restores original attr slot (byte-identical)', () => {
+  // regression: re-adding a removed attr at the END of the list changed attribute
+  // order — undo must splice the original attr object back at its captured index
+  const t = buildTechTree(makeBundle());
+  const cs = new CommandStack();
+  const node = t.byId.get('researchTier2'); // has parent="researchTier1" mid-list
+  cs.push(cmdSetAttr(t, node, 'parent', undefined));
+  assert(!node.dom.attrs.some(a => a.name === 'parent'), 'parent attr removed');
+  cs.undo();
+  eq(node.dom.attrs.map(a => a.name).indexOf('parent'), 4, 'parent back at original slot');
+  eq(generateFiles(t)['UndeadLegacy/Config/Custom/recipes_research.xml'], researchText, 'undo restores exact bytes');
+  cs.redo();
+  cs.undo();
+  eq(generateFiles(t)['UndeadLegacy/Config/Custom/recipes_research.xml'], researchText, 'redo+undo cycle stays byte-identical');
+});
+test('commands: undo of child-attr removal via cmdSetDomAttr is byte-identical', () => {
+  const t = buildTechTree(makeBundle());
+  const cs = new CommandStack();
+  const node = t.byId.get('researchTier1');
+  const unlock = node.research.unlocks[0];
+  cs.push(cmdSetDomAttr(t, unlock.dom, 'name', undefined, 'remove unlocks.name', node));
+  cs.undo();
+  eq(generateFiles(t)['UndeadLegacy/Config/Custom/recipes_research.xml'], researchText, 'undo restores exact bytes');
+});
+test('commands: ingredient count edit refreshes parsed cache (inspector reads it back)', () => {
+  // regression: editing count without the node arg updated the DOM attr but left
+  // r.ingredients stale — the inspector re-rendered the input with the old value
+  const t = buildTechTree(makeBundle());
+  const cs = new CommandStack();
+  const node = t.byId.get('researchTier2');
+  const ing = node.research.ingredients.find(i => i.name === 'ulmResourceBook');
+  const orig = ing.count;
+  cs.push(cmdSetDomAttr(t, ing.dom, 'count', '77', 'Set ingredient.count', node));
+  eq(node.research.ingredients.find(i => i.name === 'ulmResourceBook').count, '77', 'parsed cache refreshed for inspector');
+  cs.undo();
+  eq(node.research.ingredients.find(i => i.name === 'ulmResourceBook').count, orig, 'undo refreshes parsed cache too');
+  eq(generateFiles(t)['UndeadLegacy/Config/Custom/recipes_research.xml'], researchText, 'undo restores bytes');
+});
 test('commands: rename cascades to parent references', () => {
   const t = buildTechTree(makeBundle());
   const cs = new CommandStack();
@@ -213,6 +251,43 @@ test('commands: rename cascades to parent references', () => {
   eq(t.byId.get('researchTier1Renamed'), node);
   cs.undo();
   eq(generateFiles(t)['UndeadLegacy/Config/Custom/recipes_research.xml'], researchText, 'undo rename restores bytes');
+});
+// two-file fixture: rename cascades out of the node's own file into a second XML
+const renXmlA = '<Subquake><append xpath="/recipes">\n' +
+  '  <research name="renRoot"><unlocks name="renItem"/></research>\n' +
+  '  <research name="renChild" parent="renRoot"/>\n' +
+  '</append></Subquake>';
+const renXmlB = '<Subquake><append xpath="/recipes">\n' +
+  '  <research name="renCross" parent="renRoot" requires="renRoot"/>\n' +
+  '  <requirement name="ProgressionLevel" progression_name="renRoot"/>\n' +
+  '</append></Subquake>';
+function makeRenameBundle() {
+  const b = makeBundle();
+  b.sourceFiles = [
+    { mod: 'UndeadLegacy', modRoot: MOD_ROOT, path: 'Config/Custom/rename_a.xml', size: renXmlA.length, sha1: '', bom: null, text: renXmlA, role: 'research' },
+    { mod: 'UndeadLegacy', modRoot: MOD_ROOT, path: 'Config/Custom/rename_b.xml', size: renXmlB.length, sha1: '', bom: null, text: renXmlB, role: 'research' },
+  ];
+  return b;
+}
+test('commands: rename tracks fileKeys for every mutated file', () => {
+  const t = buildTechTree(makeRenameBundle());
+  const cs = new CommandStack();
+  const node = t.byId.get('renRoot');
+  const c = cmdRename(t, node, 'renRootRenamed');
+  assert(c.fileKeys instanceof Set, 'fileKeys is a Set');
+  eq(c.fileKeys.size, 2, 'own file + cross-file refs');
+  assert(c.fileKeys.has('UndeadLegacy/Config/Custom/rename_a.xml'), 'own file tracked');
+  assert(c.fileKeys.has('UndeadLegacy/Config/Custom/rename_b.xml'), 'referencing file tracked');
+  cs.push(c);
+  const files = generateFiles(t);
+  const b = files['UndeadLegacy/Config/Custom/rename_b.xml'];
+  assert(b.includes('parent="renRootRenamed"'), 'cross-file parent repointed');
+  assert(b.includes('requires="renRootRenamed"'), 'cross-file requires repointed');
+  assert(b.includes('progression_name="renRootRenamed"'), 'cross-file progression_name repointed');
+  cs.undo();
+  const restored = generateFiles(t);
+  eq(restored['UndeadLegacy/Config/Custom/rename_a.xml'], renXmlA, 'undo restores file A bytes');
+  eq(restored['UndeadLegacy/Config/Custom/rename_b.xml'], renXmlB, 'undo restores file B bytes');
 });
 test('commands: delete node + undo', () => {
   const t = buildTechTree(makeBundle());
@@ -261,6 +336,22 @@ test('commands: remove existing unlock + undo', () => {
 test('generator: pristine tree is not dirty', () => {
   const t = buildTechTree(makeBundle());
   assert(!isDirty(t, generateFiles(t)), 'pristine should not be dirty');
+});
+test('generator: generateFilesCalls debug counter increments', () => {
+  const t = buildTechTree(makeBundle());
+  const before = getGenerateFilesCalls();
+  generateFiles(t);
+  eq(getGenerateFilesCalls(), before + 1, 'counter increments per call');
+});
+test('server: iconChain cleared on every scan (no stale inheritance)', () => {
+  // static guard: the reset must exist inside scanMods and run before the chain
+  // rebuild — otherwise switching Mods directories leaks old Extends/Icon chains
+  const src = fs.readFileSync(path.join(HERE, '..', 'server.js'), 'utf8');
+  const reset = src.indexOf('delete iconChain[k]');
+  const scan = src.indexOf('scanChainsFile(path.join(VANILLA_ROOT');
+  assert(reset !== -1, 'iconChain reset statement missing');
+  assert(scan !== -1, 'chain scan call not found');
+  assert(reset < scan, 'reset must run before the chain scan rebuilds it');
 });
 
 // ------------------------------------------------------------------ diff
